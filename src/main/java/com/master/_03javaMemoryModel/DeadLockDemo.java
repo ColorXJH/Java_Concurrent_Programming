@@ -1,4 +1,4 @@
-package com.master._01threadChallenge;
+package com.master._03javaMemoryModel;
 
 /**
  * @author ColorXJH

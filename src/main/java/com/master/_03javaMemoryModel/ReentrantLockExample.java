@@ -1,4 +1,4 @@
-package com.master._01threadChallenge;
+package com.master._03javaMemoryModel;
 
 import java.util.concurrent.locks.ReentrantLock;
 

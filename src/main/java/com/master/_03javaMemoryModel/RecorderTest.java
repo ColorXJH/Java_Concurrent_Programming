@@ -1,4 +1,4 @@
-package com.master._01threadChallenge;
+package com.master._03javaMemoryModel;
 
 /**
  * @author ColorXJH
@@ -8,7 +8,7 @@ package com.master._01threadChallenge;
  */
 public class RecorderTest {
     public static void main(String[] args) {
-        RecorderExample  example=new RecorderExample();
+        RecorderExample example=new RecorderExample();
         Thread t=new Thread(new Runnable() {
             @Override
             public void run() {
