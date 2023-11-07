@@ -395,8 +395,43 @@
   
   - 42:线程的状态
   > java线程在运行的生命周期中可以处于一下6种不同的状态，在给定的一个时刻，线程只能处于其中的一个状态
-    - NEW:初始状态
+    - NEW:初始状态,线程被创建，但是还没有调用start()方法
+    - RUNNABLE:运行状态，java线程将操作系统中的就绪和运行两种状态统称为运行状态
+    - BLOCKED:阻塞状态，表示线程阻塞于锁
+    - WAITING:等待状态，表示线程进入等待状态，进入该状态表示当前线程需要等待其他线程做出一些特定动作（通知或中断）
+    - TIME_WAITING:超时等待状态，该状态不同于waiting,他是可以在指定时间自行返回的
+    - TERMINATED:终止状态，表示当前线程已经执行完毕
+  > 线程在自身的生命周期中并不是固定的处于某个状态，而是随着代码的执行在不同的状态之间切换，状态变迁如下所示：
+  > 实例初始化NEW状态--》Thread.start()-->运行Runnable状态，包括操作系统的运行中Running状态和就绪Ready状态
+  > 运行状态Runnable之间是如何切换的呢（Running<--->Ready）,yield()方法转换为Ready状态，操作系统在从ready状态调度到Running状态
+  > 运行状态等待进入synchronized方法/块--》进入到阻塞Blocked状态，如果获取到了锁，就又进入了运行状态Runnable
+  > 运行状态通过Object.wait(),Object.join(),LockSupport.park()就进入了等待状态Waiting,通过Object.notify(),Object.notifyAll(),LockSupport.unpark(Thread)就转到了运行状态
+  > 运行状态通过Thread.sleep(long),Object.wait(long),Thread.join(long),LockSupport.parkNanos(),LockSupport.parkUntil()就进入超时等待时间（timed-waiting）
+  > 超时等待状态通过Object.notify().Object.notifyAll(),LockSupport.unpark(Thread)超时时间到，进入到运行状态
+  ```
+    线程创建之后，调用start()方法开始运行，当线程执行wait()方法之后，线程进入等待状态，进入等待状态的线程需要依靠其他线程的通知才能返回到运行状态
+    而超时等待状态相当于在等待状态的基础上增加了超时限制，也就是超时时间达到将会返回运行状态，当线程调用同步方法或者代码块之时，在没有获得到锁的情况下
+    线程将会进入到阻塞状态，线程在执行完Runnable的run()方法之后将会进入到终止状态。
+    注意：java将操作系统中的运行和就绪两个状态合并为了一个运行状态，阻塞状态是线程阻塞在进入synchronized关键字修饰的方法或者代码块（获取锁）时候的状态
+         但是阻塞在java.concurrent包中的Lock接口的线程状态却是等待状态，这是因为java.concurrent包中Lock接口对于阻塞的实现均使用了LockSupport类中的相关方法
+  ```
 
-
+  - 43:Daemon线程
+  > Daemon线程是一种支持型线程，因为他主要被用作程序中后台调度及支持性工作，这意味着，当一个java虚拟机中不存在非Daemon线程的时候，java虚拟机将会退出
+  > Thread.setDaemon(true)将线程设置为Daemon线程
+  > Daemon属性需要在启动后线程之前设置
+  > Daemon线程被用作完成支持性的工作，但是在java虚拟机退出的时候Daemon线程中的finally块不一定执行
+  
+  - 44:启动和终止线程
+    - 构造线程
+    
+    - 启动线程
+    
+    - 理解中断
+    
+    - 过期的suspend(),resume(),stop()
+    
+    - 安全的终止线程
+    
 
 - java并发编程实践
