@@ -424,10 +424,48 @@
   
   - 44:启动和终止线程
     - 构造线程
-    
+    > 查看Thread线程类的init方法 
+    ```
+    private void init(ThreadGroup g, Runnable target, String name,long stackSize,
+    AccessControlContext acc) {
+      if (name == null) {
+        throw new NullPointerException("name cannot be null");
+      }
+      // 当前线程就是该线程的父线程
+      Thread parent = currentThread();
+      this.group = g;
+      // 将daemon、priority属性设置为父线程的对应属性
+      this.daemon = parent.isDaemon();
+      this.priority = parent.getPriority();
+      this.name = name.toCharArray();
+      this.target = target;
+      setPriority(priority);
+      // 将父线程的InheritableThreadLocal复制过来
+      if (parent.inheritableThreadLocals != null)
+      this.inheritableThreadLocals=ThreadLocal.createInheritedMap(parent.
+      inheritableThreadLocals);
+      // 分配一个线程ID
+      tid = nextThreadID();
+    }
+    ```
+    > 一个新构造的线程对象是由其parent线程来进行空间分配的，而child线程
+    继承了parent是否为Daemon、优先级和加载资源的contextClassLoader以及可继承的
+    ThreadLocal，同时还会分配一个唯一的ID来标识这个child线程。至此，一个能够运行的线程对
+    象就初始化好了，在堆内存中等待着运行
     - 启动线程
-    
+    > 线程对象在初始化完成之后，调用start()方法就可以启动这个线程。线程start()方法的含义
+    是：当前线程（即parent线程）同步告知Java虚拟机，只要线程规划器空闲，应立即启动调用
+    start()方法的线程,启动一个线程前，最好为这个线程设置线程名称，因为这样在使用jstack分析程
+    序或者进行问题排查时，就会给开发人员提供一些提示，自定义的线程最好能够起个名字
     - 理解中断
+    > 中断可以理解为线程的一个标志位属性，它表示一个运行中的线程是否被其他运行的线程进行了中断操作，中断好比其他线程
+    > 对该线程打了个招呼，其他线程通过调用该线程的interrupt()方法对其进行中断操作，
+    > 线程通过检查自身是否被中断了来进行响应，线程通过方法isInterrupted()方法来进行判断是否被中断，也可以调用静态方法
+    > Thread.interrupted()对当前线程进行标志位复位，如果该线程已经处于终结状态，即使该线程被中断过，在调用该线程对象
+    > 的isInterrupted()时依旧会返回false
+    > 从java的api可以看出，许多声明抛出InterruptedException的方法，例如Thread.sleep(long),这些方法在抛出异常之前
+    > java虚拟机会先将该线程的中断标识位清除，然后抛出InterruptedException，此时调用isInterrupted()方法会返回false
+    > 观察表示位置，见Chapter4代码Interrupted类
     
     - 过期的suspend(),resume(),stop()
     
