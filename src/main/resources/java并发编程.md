@@ -683,16 +683,21 @@
     ```
     > 实现自定义同步组件时，将会调用同步器提供的模板方法，这些（部分）方法描述如下：
     ```
-    1:
-    2:
-    3:
-    4:
-    5:
-    6:
-    7:
-    8:
-    9:
+    1:void acquire(int arg):独占式获取同步状态，如果当前西安城获取同步状态成功，则由该方法返回，否则，将会进入同步队列等待，该方法将会调用重写的tryAcquire(int arg)方法
+    2:void acquireInterruptibly(int arg):与上面方法相同，但是该方法响应中断，当前线程未能获取到同步状态而进入同步队列中，如果当前线程被中断则该方法抛出InterruptedException并返回
+    3:boolean tryAcquireNanos(int arg,long nanos):在上一个方法的基础上增加了超时限制，如果当前线程在超时时间内没有获取到同步状态，那么将会返回false,如果获取到了返回true
+    4:void acquireShared(int arg):共享式的获取同步状态，如果当前线程未能获取到同步状态，将会进入到同步队列等待，与独占式获取的主要区别在于同一时刻可以有多个线程获取到同步状态
+    5:void acquireSharedInterruptibly(int arg):与上述方法相同，却别再与该方法相应中断
+    6:boolean tryAcquireSharedNanos(int arg,long nanaos):在上述方法的基础上增加了超时设置
+    7:boolean release(int args)：独占式的释放同步状态，该方法会在释放同步状态之后，将同步队列中第一个节点包含的线程唤醒
+    8:boolean releaseShared(int args):共享式的释放同步状态
+    9:Collection<Thread>getQueuedThreads():获取等待在同步队列上的线程集合
     ```
+    > 同步器提供的模板方法基本上分为3类：独占式获取与释放同步状态，共享式释放与获取同步状态，查询同步队列中的等待线程情况，自定义同步组件将使用同步器提供的模板方法来实现自己的同步语义
+    > 只有账务了同步器的同步原理才能更深入的理解并发包中的其他并发组件，已一个独占锁的实例来了解同步器的工作原理
+    > 独占锁，顾名思义就是在同一时刻只能由一个线程获取到锁，而其他获取锁的线程只能在同步队列中等待，只有获取锁的线程释放了锁，后续的线程才能够获得到锁，见Mutex.java
+    > 
+    > 
     > 
      
 
