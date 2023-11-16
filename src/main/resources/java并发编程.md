@@ -740,7 +740,87 @@
           }
     }
     ```
-    > 上述代码主要完成了同步状态的获取,节点构造,加入同步队列,在同步队列中自选等待的相关工作,
+    > 上述代码主要完成了同步状态的获取,节点构造,加入同步队列,在同步队列中自选等待的相关工作,其主要逻辑是：
+    ```
+    1:首先调用自定义同步器实现的tryAcquire(int arg)方法，该方法保证线程安全的获取同步状态，
+    2:如果同步状态获取失败，则构造同步节点（独占式Node.EXCLUSIVE,同一时刻只能有一个线程成功获取同步状态）并通过addWaiter(Node node)方法将该节点加入到同步队列的尾部
+    3:最后调用acquireQueued(Node node,int arg)方法，使得该节点以死循环的方式获取同步状态，如果获取不到则阻塞节点中的线程，而被阻塞线程的唤醒主要依靠前驱节点的出队或者阻塞线程被被中断来实现
+    ```
+    > 先看节点的构造以及加入同步队列，同步器的addWaiter和enq
+    ```
+    private Node addWaiter(Node mode){
+      //构造一个新的节点
+      Node node=new Node(Thread.currentThread(),mode);
+      //快速尝试在尾部添加
+      Node pred=tail;
+      if(pred!=null){
+        //将新节点的前驱节点连接到尾部节点
+        node.prev=pred
+        if(compareAndSetTail(pred,node)){//该方法操作一个tail字段，也就是我们的尾部指针pred，尝试将队列的尾部指针更新为node,
+          //成功则更新队列的尾部指针指向node
+          pred.next=node;
+          return node;
+        }
+        //失败则
+        enq(node);
+        return node;
+      }  
+    }
+    
+    private Node enq(final Node node){
+      for(;;){
+        Node t=tail;
+        if(t==null){//一下初始化
+          if(compareAndSetHead(new Node())){
+           //compareAndSetHead(node)：比较链表的头节点head和传入的新节点node,如果头节点为null,会将新节点node设置为头节点，并返回true
+           tail=head;//这里同时也将尾节点指针指向头节点指针所指向的node，因为就一个节点Node
+          }
+        }else{
+          node.prev=t;//新节点的前驱节点设置为尾节点
+          if(compareAndSetTail(t,node)){//比较当前的尾巴节点是否是为t,是的话将其更新为node
+            //更新成功后
+            t.next=node;
+            return t;//这里tail为节点指针已经指向
+          }
+          
+        }
+      }
+    }
+    compareAndSetTail确保节点被线程啊暖的添加到尾部
+    enq()方法中同步器通过死循环确保节点的正确添加，在死循环中只有通过CAS将节点设置成尾节点之后，当前线程才能从该方法返回，否则当前线程不断的尝试设置，
+      可以看出enq()方法将并发添加节点的请求通过CAS变得“串行化”了
+    ```
+    > 返回t而不是返回node的原因是，t是node的前一个节点，它本身也是队列中的一个节点。在队列的操作中，通常会返回当前节点或前一个节点，以便于维护队列的完整性。
+    例如，如果我们在队列的头部添加一个新的节点，我们通常会返回旧的头节点，以便于在之后的操作中能够正确地维护队列的顺序。
+    同样地，在将一个新节点插入到队列的尾部时，返回t有助于在之后的操作中正确地维护队列的顺序。例如，如果需要在队列中删除一个节点，我们可以通过访问t来找到node并执行删除操作。
+    总之，返回t而不是返回node是为了在之后的操作中更方便地维护队列的完整性。
+    > 
+    > 节点进入同步队列之后，就进入了一个自旋得过程，每个节点，或者说每个线程，都在自省的观察，当条件满足，获得到了同步状态，就可以从这个自旋过程中退出，否则以就留在
+    > 这个自旋过程中（并且会阻塞该节点的线程），如下：
+    ```
+    final boolean acquireQueued(final Node node,int arg){
+        boolean failed=true;
+        try{
+          boolean interrupted=fale;
+          for(;;){
+            final Node p=node.predecessor();
+            if(p==head&&tryAcquire(arg)){
+                setHead(node);
+                p.next=null;//help GC
+                failed=false;
+                return interrupted;
+            }
+            if(shouldParkAfterFailedAcquire(p,node)&&parkAndCheckInterrupt()){
+                interrupted=true;
+            }
+          }
+        }
+        finally{
+          if(failed){
+            cancelAcquire(node);
+          }
+        }
+    }
 
-  
+    ```
 - java并发编程实践
