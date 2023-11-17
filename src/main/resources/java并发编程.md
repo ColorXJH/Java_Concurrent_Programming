@@ -696,143 +696,211 @@
     > 同步器提供的模板方法基本上分为3类：独占式获取与释放同步状态，共享式释放与获取同步状态，查询同步队列中的等待线程情况，自定义同步组件将使用同步器提供的模板方法来实现自己的同步语义
     > 只有账务了同步器的同步原理才能更深入的理解并发包中的其他并发组件，已一个独占锁的实例来了解同步器的工作原理
     > 独占锁，顾名思义就是在同一时刻只能由一个线程获取到锁，而其他获取锁的线程只能在同步队列中等待，只有获取锁的线程释放了锁，后续的线程才能够获得到锁，见Mutex.java
-  - 51:队列同步器的实现分析 
+    - 51:队列同步器的实现分析 
     > 探究抽象队列同步器是如何完成线程同步的,主要包括:同步队列,独占式同步状态获取与释放,共享式同步状态获取与释放,超时获取同步状态等同步器的核心数据结构与模板算法
-    - 1:同步队列
+      - 1:同步队列
     > 同步器依赖的内部同步队列(一个FIFO双向队列)来完成同步状态的管理,当前线程获取同步状态失败时,同步器会将当前线程以及等待状态等信息构造成一个节点Node并将其加入同步队列
     > 同时会阻塞当前线程,当同步状态释放时,会把首节点中的线程唤醒,使其再次尝试获取同步状态
     > 
     > 同步队列中的节点Node用来保存获取同步状态失败的线程引用,等待状态以及前驱和后继节点,节点的属性类型与名称以及描述如下
-    ```
-    int waitStatus:等待状态,包括如下状态:
-      1:CANCELLED,值为1,由于在同步队列中等待的线程等待超时或者被中断,需要从同步队列中取消等待,节点进入该状态将不会变化
-      2:SIGNAL,值为-1后继节点的线程处于等待状态,而当前节点的线程如果释放了同步状态或者被中断,将会通知后继节点,是后继节点的线程得以运行
-      3:CONDITION,值为-2,节点在等待队列中,节点线程等待在Condition上,当其他线程对Condition调用了signal()方法后,该节点将会从等待队列中转移到同步队列中,加入到对同步状态的获取中
-      4:PROPAGATE,值为-3,表示下一次共享式同步状态获取将会无条件的被传播下去
-      5:INITIAL,值为0,初始状态
-    Node prev:前驱节点,当节点加入同步队列的时候被设置(尾部添加)
-    Node next:后继节点
-    Node nextWaiter:等待队列中的后继节点,如果当前节点是共享的,那么这个字段将是一个SHARED常量,也就是说,节点类型(独占和共享)和等待队列中的后继节点共用同一个字段
-    Thread thread:获取同步状态的线程
-    ```
+      ```
+      int waitStatus:等待状态,包括如下状态:
+        1:CANCELLED,值为1,由于在同步队列中等待的线程等待超时或者被中断,需要从同步队列中取消等待,节点进入该状态将不会变化
+        2:SIGNAL,值为-1后继节点的线程处于等待状态,而当前节点的线程如果释放了同步状态或者被中断,将会通知后继节点,是后继节点的线程得以运行
+        3:CONDITION,值为-2,节点在等待队列中,节点线程等待在Condition上,当其他线程对Condition调用了signal()方法后,该节点将会从等待队列中转移到同步队列中,加入到对同步状态的获取中
+        4:PROPAGATE,值为-3,表示下一次共享式同步状态获取将会无条件的被传播下去
+        5:INITIAL,值为0,初始状态
+      Node prev:前驱节点,当节点加入同步队列的时候被设置(尾部添加)
+      Node next:后继节点
+      Node nextWaiter:等待队列中的后继节点,如果当前节点是共享的,那么这个字段将是一个SHARED常量,也就是说,节点类型(独占和共享)和等待队列中的后继节点共用同一个字段
+      Thread thread:获取同步状态的线程
+      ```
     > 节点是构成同步队列的基础,同步器拥有首节点head,和尾节点tail,没有成功获取同步状态的线程将会成为节点加入该队列的尾部,同步队列的基本结构如下:
-    ```
-      同步器 setHead(Node update)         节点1      节点2
-       head->指向首节点-->节点1            prev<------prev
-       tail->指向尾节点-->节点2            next------>next
-          CAS设置尾节点:compareAndSetTail(Node expect,Node update)
-    在上述描述中,同步器包含了两个节点类型的引用,一个指向头节点,一个指向尾节点,试想一下,一个线程成功的获取的同步状态(或者锁),其他线程将无法获取到同步状态
-    转而被构造成为节点并加入到同步队列中,而这个加入队列的过程必须保证线程安全,因此同步器提供了一个基于CAS的设置尾节点的方法:compareAndSetTail(Node expect,Node update)
-    它需要传递当前线程"认为"的尾节点和当前节点,只有设置成功后,当前节点才正式与之前的尾节点建立关联
-    ```
-    ![img_4.png](img_4.png)
+      ```
+        同步器 setHead(Node update)         节点1      节点2
+         head->指向首节点-->节点1            prev<------prev
+         tail->指向尾节点-->节点2            next------>next
+            CAS设置尾节点:compareAndSetTail(Node expect,Node update)
+      在上述描述中,同步器包含了两个节点类型的引用,一个指向头节点,一个指向尾节点,试想一下,一个线程成功的获取的同步状态(或者锁),其他线程将无法获取到同步状态
+      转而被构造成为节点并加入到同步队列中,而这个加入队列的过程必须保证线程安全,因此同步器提供了一个基于CAS的设置尾节点的方法:compareAndSetTail(Node expect,Node update)
+      它需要传递当前线程"认为"的尾节点和当前节点,只有设置成功后,当前节点才正式与之前的尾节点建立关联
+      ```
+      ![img_4.png](img_4.png)
     > 同步队列遵循FIFO,首节点是获取同步装填成功的节点,首节点的线程在释放同步状态时,将会唤醒后继节点,而后继节点将会在获取同步状态成功时将自己设置为首节点,
-    ![img_3.png](img_3.png)
+      ![img_3.png](img_3.png)
     > 如上图:设置首节点是通过获取同步状态成功的线程完成的,由于只有一个线程能够成功获取到同步状态,因此设置头节点的方法并不需要使用CAS来保证,他只需要将首节点设置成原节点的后继节点
     > 并断开原节点的next引用即可
-    - 2:独占式同步状态获取与释放
+      - 2:独占式同步状态获取与释放
     > 通过调用同步器的acquire(int arg)方法可以获取同步状态,该方法对中断不敏感,也就是说由于线程获取同步状态失败后进入同步队列中,后续对线程进行中断操作时,线程不会从同步队列中移除
     > 代码如下
-    ```
-    public final void acquire(int arg){
-          if(!tryAcquire(arg)&&acquireQueued(addWaiter(Node.EXCLUSIVE),arg)){
-               selfInterrupt();
-          }
-    }
-    ```
+      ```
+      public final void acquire(int arg){
+            if(!tryAcquire(arg)&&acquireQueued(addWaiter(Node.EXCLUSIVE),arg)){
+                 selfInterrupt();
+            }
+      }
+      ```
     > 上述代码主要完成了同步状态的获取,节点构造,加入同步队列,在同步队列中自选等待的相关工作,其主要逻辑是：
-    ```
-    1:首先调用自定义同步器实现的tryAcquire(int arg)方法，该方法保证线程安全的获取同步状态，
-    2:如果同步状态获取失败，则构造同步节点（独占式Node.EXCLUSIVE,同一时刻只能有一个线程成功获取同步状态）并通过addWaiter(Node node)方法将该节点加入到同步队列的尾部
-    3:最后调用acquireQueued(Node node,int arg)方法，使得该节点以死循环的方式获取同步状态，如果获取不到则阻塞节点中的线程，而被阻塞线程的唤醒主要依靠前驱节点的出队或者阻塞线程被被中断来实现
-    ```
+      ```
+      1:首先调用自定义同步器实现的tryAcquire(int arg)方法，该方法保证线程安全的获取同步状态，
+      2:如果同步状态获取失败，则构造同步节点（独占式Node.EXCLUSIVE,同一时刻只能有一个线程成功获取同步状态）并通过addWaiter(Node node)方法将该节点加入到同步队列的尾部
+      3:最后调用acquireQueued(Node node,int arg)方法，使得该节点以死循环的方式获取同步状态，如果获取不到则阻塞节点中的线程，而被阻塞线程的唤醒主要依靠前驱节点的出队或者阻塞线程被被中断来实现
+      ```
     > 先看节点的构造以及加入同步队列，同步器的addWaiter和enq
-    ```
-    private Node addWaiter(Node mode){
-      //构造一个新的节点
-      Node node=new Node(Thread.currentThread(),mode);
-      //快速尝试在尾部添加
-      Node pred=tail;
-      if(pred!=null){
-        //将新节点的前驱节点连接到尾部节点
-        node.prev=pred
-        if(compareAndSetTail(pred,node)){//该方法操作一个tail字段，也就是我们的尾部指针pred，尝试将队列的尾部指针更新为node,
-          //成功则更新队列的尾部指针指向node
-          pred.next=node;
+      ```
+      private Node addWaiter(Node mode){
+        //构造一个新的节点
+        Node node=new Node(Thread.currentThread(),mode);
+        //快速尝试在尾部添加
+        Node pred=tail;
+        if(pred!=null){
+          //将新节点的前驱节点连接到尾部节点
+          node.prev=pred
+          if(compareAndSetTail(pred,node)){//该方法操作一个tail字段，也就是我们的尾部指针pred，尝试将队列的尾部指针更新为node,
+            //成功则更新队列的尾部指针指向node
+            pred.next=node;
+            return node;
+          }
+          //失败则
+          enq(node);
           return node;
-        }
-        //失败则
-        enq(node);
-        return node;
-      }  
-    }
+        }  
+      }
     
-    private Node enq(final Node node){
-      for(;;){
-        Node t=tail;
-        if(t==null){//一下初始化
-          if(compareAndSetHead(new Node())){
-           //compareAndSetHead(node)：比较链表的头节点head和传入的新节点node,如果头节点为null,会将新节点node设置为头节点，并返回true
-           tail=head;//这里同时也将尾节点指针指向头节点指针所指向的node，因为就一个节点Node
-          }
-        }else{
-          node.prev=t;//新节点的前驱节点设置为尾节点
-          if(compareAndSetTail(t,node)){//比较当前的尾巴节点是否是为t,是的话将其更新为node
-            //更新成功后
-            t.next=node;
-            return t;//这里tail为节点指针已经指向
-          }
+      private Node enq(final Node node){
+        for(;;){
+          Node t=tail;
+          if(t==null){//一下初始化
+            if(compareAndSetHead(new Node())){
+             //compareAndSetHead(node)：比较链表的头节点head和传入的新节点node,如果头节点为null,会将新节点node设置为头节点，并返回true
+             tail=head;//这里同时也将尾节点指针指向头节点指针所指向的node，因为就一个节点Node
+            }
+          }else{
+            node.prev=t;//新节点的前驱节点设置为尾节点
+            if(compareAndSetTail(t,node)){//比较当前的尾巴节点是否是为t,是的话将其更新为node
+              //更新成功后
+              t.next=node;
+              return t;//这里tail为节点指针已经指向
+            }
           
+          }
         }
       }
-    }
-    compareAndSetTail确保节点被线程啊暖的添加到尾部
-    enq()方法中同步器通过死循环确保节点的正确添加，在死循环中只有通过CAS将节点设置成尾节点之后，当前线程才能从该方法返回，否则当前线程不断的尝试设置，
-      可以看出enq()方法将并发添加节点的请求通过CAS变得“串行化”了
-    ```
+      compareAndSetTail确保节点被线程啊暖的添加到尾部
+      enq()方法中同步器通过死循环确保节点的正确添加，在死循环中只有通过CAS将节点设置成尾节点之后，当前线程才能从该方法返回，否则当前线程不断的尝试设置，
+        可以看出enq()方法将并发添加节点的请求通过CAS变得“串行化”了
+      ```
     > 返回t而不是返回node的原因是，t是node的前一个节点，它本身也是队列中的一个节点。在队列的操作中，通常会返回当前节点或前一个节点，以便于维护队列的完整性。
-    例如，如果我们在队列的头部添加一个新的节点，我们通常会返回旧的头节点，以便于在之后的操作中能够正确地维护队列的顺序。
-    同样地，在将一个新节点插入到队列的尾部时，返回t有助于在之后的操作中正确地维护队列的顺序。例如，如果需要在队列中删除一个节点，我们可以通过访问t来找到node并执行删除操作。
-    总之，返回t而不是返回node是为了在之后的操作中更方便地维护队列的完整性。
+      例如，如果我们在队列的头部添加一个新的节点，我们通常会返回旧的头节点，以便于在之后的操作中能够正确地维护队列的顺序。
+      同样地，在将一个新节点插入到队列的尾部时，返回t有助于在之后的操作中正确地维护队列的顺序。例如，如果需要在队列中删除一个节点，我们可以通过访问t来找到node并执行删除操作。
+      总之，返回t而不是返回node是为了在之后的操作中更方便地维护队列的完整性。
     > 
     > 节点进入同步队列之后，就进入了一个自旋得过程，每个节点，或者说每个线程，都在自省的观察，当条件满足，获得到了同步状态，就可以从这个自旋过程中退出，否则以就留在
     > 这个自旋过程中（并且会阻塞该节点的线程），如下：
-    ```
-    final boolean acquireQueued(final Node node,int arg){
-        boolean failed=true;
-        try{
-          boolean interrupted=fale;
-          for(;;){
-            final Node p=node.predecessor();
-            if(p==head&&tryAcquire(arg)){
-                setHead(node);
-                p.next=null;//help GC
-                failed=false;
-                return interrupted;
-            }
-            if(shouldParkAfterFailedAcquire(p,node)&&parkAndCheckInterrupt()){
-                interrupted=true;
+      ```
+      final boolean acquireQueued(final Node node,int arg){
+          boolean failed=true;
+          try{
+            boolean interrupted=fale;
+            for(;;){
+              final Node p=node.predecessor();
+              if(p==head&&tryAcquire(arg)){
+                  setHead(node);
+                  p.next=null;//help GC
+                  failed=false;
+                  return interrupted;
+              }
+              if(shouldParkAfterFailedAcquire(p,node)&&parkAndCheckInterrupt()){
+                  interrupted=true;
+              }
             }
           }
-        }
-        finally{
-          if(failed){
-            cancelAcquire(node);
+          finally{
+            if(failed){
+              cancelAcquire(node);
+            }
           }
-        }
-    }
-    在acquireQueued(final Node node,int arg)方法中，当前线程在“死循环”中尝试获取同步状态，而只有前驱节点是头节点才能尝试获取同步状态，原因如下：
-    1：头节点是成功获取到同步状态的节点，而头节点的线程释放了同步状态之后，将会唤醒其后继节点，后继节点的线程被唤醒后需要检查自己的前驱节点是否是头节点
-    2：维护同步队列的FIFO原则，该方法中，节点自旋获取同步状态的行为如下
-    ```
-    ![img_2.png](img_2.png)
-    ```
-    上图中：由于非首节点线程前驱节点出队或者被中断而从等待状态返回，随后检查自己的前驱节点是否是头节点，如果是则尝试获取同步状态，可以看到节点和节点之间
-    在循环检查的过程中基本不互相通信，而是简单的判断自己的前驱节点是否为头节点，这样就使得节点的释放规则符合FIFO,并且也便于对过早通知的处理（过早通知是指前驱节点不是头节点的线程由于中断而被唤醒）
-    ```
+      }
+      在acquireQueued(final Node node,int arg)方法中，当前线程在“死循环”中尝试获取同步状态，而只有前驱节点是头节点才能尝试获取同步状态，原因如下：
+      1：头节点是成功获取到同步状态的节点，而头节点的线程释放了同步状态之后，将会唤醒其后继节点，后继节点的线程被唤醒后需要检查自己的前驱节点是否是头节点
+      2：维护同步队列的FIFO原则，该方法中，节点自旋获取同步状态的行为如下
+      ```
+      ![img_2.png](img_2.png)
+      ```
+      上图中：由于非首节点线程前驱节点出队或者被中断而从等待状态返回，随后检查自己的前驱节点是否是头节点，如果是则尝试获取同步状态，可以看到节点和节点之间
+      在循环检查的过程中基本不互相通信，而是简单的判断自己的前驱节点是否为头节点，这样就使得节点的释放规则符合FIFO,并且也便于对过早通知的处理（过早通知是指前驱节点不是头节点的线程由于中断而被唤醒）
+      ```
     > 独占式同步状态获取流程，也就是acquire(int arg)方法调用流程，如下图：
-    ![img_5.png](img_5.png)
+      ![img_5.png](img_5.png)
     > 
     > 在上图中，前驱节点为头节点且能够获取同步状态的判断条件和线程进入等待状态是获取同步状态的自旋过程，当同步状态获取成功后，当前线程从acquire(int arg)方法返回
     > 如果对于锁这种并发组件而言，代表着当前线程获取了锁
+    > 
+    > 当前线程获取同步状态并执行了相应的逻辑之后，就需要释放同步状态，使得后继节点能够继续获得同步状态，通过调用同步器的release(int arg)方法可以释放同步状态
+    > 该方法在释放了同步状态之后，会唤醒其后继节点（进而使后继节点重新尝试获取同步状态），方法代码如下：
+      ```
+      public final boolean release(int arg){
+          if(tryRelease(arg)){
+            Node h=head;
+             if(h!=null&&h.waitStatus!=0){
+                unparkSuccessor(h);
+             }
+            return true;
+          }
+          return false;
+      }
+      该方法执行时，会唤醒头节点的后继节点的线程，unparkSuccessor(h)方法使用LockSupport来唤醒处于等待状态的线程
+      分析了独占式同步状态的获取和释放过程之后：总结如下：
+        在获取同步状态时，同步器维护一个同步队列，获取状态失败的线程都会被加入到队列中并在队列中进行自旋，移出队列
+        （或者停止自旋）的调价是前驱节点为头节点且成功获取了同步状态。在释放同步状态时，同步器调用tryRelease(int arg)
+         方法释放同步状态，然后唤醒头节点的后继节点
+      ```
+      - 3:共享式同步状态获取与释放
+    > 共享式获取与独占式获取的最主要的区别在于同一时刻能否有多个线程同时获取到同步状态，以文件的读写为例，如果一个程序在对文件进行读操作，
+    > 那么这一时刻对于该文件的写操作均被阻塞，而读操作能够同时进行，写操作要求对资源的独占式访问，而读操作可以是共享式访问，两种不同的访问模式
+    > 在同一时刻对文件资源的昂问情况如下图:
+      ![img_6.png](img_6.png)
+    > 
+    > 通过调用同步器的acquireShared(int arg)方法可以共享式的获取同步状态，代码如下：
+      ```
+      public final void acquireShared(int arg){
+          if(tryAcquireShared(arg)){
+              doAcquireShared(arg);   
+          }
+      }
+      public void doAcquireShared(int arg){
+          final Node node=addWaiter(Node.SHARED);
+          boolean failed=true;
+          try{
+              boolean interrupted=false;        
+              for(;;){
+                  final Node p=node.predecessor();
+                  if(p==head){
+                      int r=tryAcquireShared(arg);
+                      if(r>=0){
+                          setHeadAndPropagate(node,r);
+                          p.next=null;
+                          if(interrupted){selfInterrupt();}
+                          failed=false;
+                          return;
+                      }
+                  }
+                  if(shouldParkAfterFailedAcquire(p,node)&&parkAndCheckInterrupt()){
+                      interrupted=true;
+                  }
+              }
+          }finally{
+              if(failed){
+                 cancelAcquire(node);
+              }
+          }
+      }
+      在上述acquireShared方法中，同步器调用tryAcquireShared方法尝试获取同步状态，tryAcquireShared方法返回值为int,
+      当返回值大于0时表示能够获取到同步状态，因此在共享式获取的自旋过程中，成功获取到同步状态并退出自旋的条件就是tryAcquireShared
+      方法的返回值大于0，在doAcquireShared方法的自旋过程中，如果当前节点的前驱节点为头节点时，尝试获取同步状态，如果返回值大于0，
+      表示该次获取同步状态成功并从自旋过程中退出。
+      ```
+
+
+
 - java并发编程实践
