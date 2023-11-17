@@ -899,8 +899,22 @@
       当返回值大于0时表示能够获取到同步状态，因此在共享式获取的自旋过程中，成功获取到同步状态并退出自旋的条件就是tryAcquireShared
       方法的返回值大于0，在doAcquireShared方法的自旋过程中，如果当前节点的前驱节点为头节点时，尝试获取同步状态，如果返回值大于0，
       表示该次获取同步状态成功并从自旋过程中退出。
+     
+      与独占式一样，共享式获取也需要释放同步状态，通过调用releaseShared(int arg)方法可以释放同步状态，代码如下：
+      public final boolean releaseShared(int arg){
+        if(tryReleaseShared(arg)){
+          doReleaseShared();
+          return true;
+        }
+      }
+      该方法在释放同步状态之后，将会唤醒后续处于等待状态的节点，对于能够支持多个线程同时访问的并发组件，比如Semaphore,
+      它和独占式主要区别在于tryReleseShared(int arg)方法必须确保同步状态（或者资源数）线程安全释放，一般是通过循环和CAS来保证的
+      因为释放同步状态的操作会同时来自多个线程
       ```
-
+      - 4:独占式超时获取同步状态
+    > 
+    > 
+    > 
 
 
 - java并发编程实践
