@@ -696,7 +696,7 @@
     > 同步器提供的模板方法基本上分为3类：独占式获取与释放同步状态，共享式释放与获取同步状态，查询同步队列中的等待线程情况，自定义同步组件将使用同步器提供的模板方法来实现自己的同步语义
     > 只有账务了同步器的同步原理才能更深入的理解并发包中的其他并发组件，已一个独占锁的实例来了解同步器的工作原理
     > 独占锁，顾名思义就是在同一时刻只能由一个线程获取到锁，而其他获取锁的线程只能在同步队列中等待，只有获取锁的线程释放了锁，后续的线程才能够获得到锁，见Mutex.java
-    - 51:队列同步器的实现分析 
+  - 51:队列同步器的实现分析 
     > 探究抽象队列同步器是如何完成线程同步的,主要包括:同步队列,独占式同步状态获取与释放,共享式同步状态获取与释放,超时获取同步状态等同步器的核心数据结构与模板算法
       - 1:同步队列
     > 同步器依赖的内部同步队列(一个FIFO双向队列)来完成同步状态的管理,当前线程获取同步状态失败时,同步器会将当前线程以及等待状态等信息构造成一个节点Node并将其加入同步队列
@@ -912,9 +912,156 @@
       因为释放同步状态的操作会同时来自多个线程
       ```
       - 4:独占式超时获取同步状态
+    > 通过调用同步器的doAcquireNanos(int arg,long nanosTimeout)方法可以超时获取同步状态，即在指定的时间段内获取同步状态，如果获取到同步住哪个太则返回true
+    > 否则返回false,该方法提供了传统java同步操作（比如synchronized关键字）所不具备的特性
     > 
+    > 在分析该方法之前，先介绍一下响应中断中断的同步状态获取过程，在java5以前，当一个线程获取不到锁而被阻塞在synchronized之外时，对该线程进行中断操作，此刻该线程
+    > 的中断标志位会被修改，但是该线程依旧会阻塞在synchronized之上，等待着获取锁，在java5中，同步器提供了acquireInterruptibly(int arg)方法，这个方法在等待获取
+    > 同步状态时，如果当前线程被中断，会立刻返回，并抛出InterruptedException
     > 
+    > 超时获取同步状态过程可以被视作响应中断获取同步状态过程的增强版，doAcquireNanos()方法在支持响应中断的基础上，增加了超时获取的特性，针对超时获取
+    > 主要需要计算出睡眠的时间间隔，为了防止过早的通知，timeOut的计算公式为now-lastTime,其中now为当前唤醒时间，lastTime为上次唤醒时间，如果nanosTimeout大于0，
+    > 则表示超时时间未到，需要继续睡眠nanosTimeout纳秒，反之表示已经超时，
+    >
+    ```
+    private boolean doAcquireNanos(int arg,long nanosTimeout) throws InterruptedException{
+        long lastTime=System.nanoTime();
+        final Node node=addWaiter(Node.EXCLUSIVE);
+        boolean failed=true;
+        try{
+            for(;;){
+                final Node p=node.predecessor();
+                if(p==head&&tryAcquire(arg)){
+                    setHead(node);
+                    p.next=null;
+                    failed=false;
+                    return true;
+                }
+                if(nanoTimeout<=0){
+                    return false;
+                }
+                if(shouldParkAfterFailedAcquire(p,node)&&nanoTimeout>spinForTimeoutThreshold){
+                    LockSupport.parkNanos(this,nanosTimeout);
+                }
+                long now=System.nanoTime();
+                //计算时间，当前时间now减去睡眠时间之前的lastTime,得到已经睡眠的时间delta,然后被原有的超时时间nanosTimeout减去，得到还应该剩余的睡眠时间
+                nanosTimeout-=now-lastTime;
+                lastTime=now;
+                if(Thread.interrupted()){throw new InterruptedException();}
+            }
+        }finally{
+            if(failed){cancelaAcquire(node);}
+        }
+    }  
+    该方法在自旋的过程中，当节点的前驱节点为头节点时，尝试获取同步状态，如果成功获取则从该方法返回，这个过程和独占式同步获取的过程有点类似，
+    但是在同步状态获取失败的处理上有所不同，如果当前线程获取同步状态失败，则判断是否超时，（nanosTimeout<0表示已经超时），如果没有超时则重新计算nanosTimeout,
+    然后使当前线程等待nanosTimeout纳秒，当以到设置的超时时间，该线程会从LockSupport.parkNanos(Object blocker,long nanos)方法返回
+    
+    如果nanosTimeout小于等于spinForTimeoutThreshold（1000纳秒）时，将不会使该线程进行超时等待，
+    而是进入快速的自旋过程。原因在于，非常短的超时等待无法做到十分精确，如果这时再进行超时等待，相反会让nanosTimeout的超时从整体上表现得反而不精确。
+    因此，在超时非常短的场景下，同步器会进入无条件的快速自旋。
+    独占式超时获取同步状态流程如下：
+    ```
+    ![img_7.png](img_7.png)
     > 
-
+    > 从上图可以看出，独占式超时获取同步状态doAcquireNanos(int arg,long nanosTimeout)和独占式获取同步状态acquire(int arg),在流程上非常相似
+    > 主要区别在与未能获取到同步状态是的逻辑处理，acquire在未获取到同步状态时，将会使线程一直处于等待状态，而doAcquireNanos会使当前线程等待nanosTimeout纳秒
+    > 如果当前线程在nanosTimeout纳秒内没有获取到同步状态，将会从等待逻辑中自动返回
+    
+     - 5：自定义同步组件--TwinsLock
+    > 在前面的章节中，对同步器AbstractQueuedSynchronizer进行了实现层面的分析，本节通过编写一个自定义同步组件来加深对同步器的理解.
+    > 设计一个同步工具，该工具在同一时刻，只允许之多两个线程访问，超过两个线程的 访问将被阻塞，我们将这个同步工具命名为TwinsLock。
+    > 
+    > 首先，确定访问模式。TwinsLock能够在同一时刻支持多个线程的访问，这显然是共享式
+    访问，因此，需要使用同步器提供的acquireShared(int args)方法等和Shared相关的方法，这就要
+    求TwinsLock必须重写tryAcquireShared(int args)方法和tryReleaseShared(int args)方法，这样才能
+    保证同步器的共享式同步状态的获取与释放方法得以执行。
+    > 
+    > 其次，定义资源数。TwinsLock在同一时刻允许至多两个线程的同时访问，表明同步资源
+    数为2，这样可以设置初始状态status为2，当一个线程进行获取，status减1，该线程释放，则
+    status加1，状态的合法范围为0、1和2，其中0表示当前已经有两个线程获取了同步资源，此时
+    再有其他线程对同步状态进行获取，该线程只能被阻塞。在同步状态变更时，需要使用
+    compareAndSet(int expect,int update)方法做原子性保障。
+    > 
+    > 最后，组合自定义同步器。前面的章节提到，自定义同步组件通过组合自定义同步器来完
+    成同步功能，一般情况下自定义同步器会被定义为自定义同步组件的内部类。见TwinsLock.java
+    > 
+  - 52:重入锁
+    > 重入锁ReentrantLock，顾名思义，就是支持重进入的锁，它表示该锁能够支持一个线程对资源的重复加锁。除此之外，该锁的还支持获取锁时的公平和非公平性选择。
+    > 
+    > 回忆在同步器一节中的示例（Mutex），同时考虑如下场景：当一个线程调用Mutex的lock()
+    方法获取锁之后，如果再次调用lock()方法，则该线程将会被自己所阻塞，原因是Mutex在实现
+    tryAcquire(int acquires)方法时没有考虑占有锁的线程再次获取锁的场景，而在调用
+    tryAcquire(int acquires)方法时返回了false，导致该线程被阻塞。简单地说，Mutex是一个不支持
+    重进入的锁。而synchronized关键字隐式的支持重进入，比如一个synchronized修饰的递归方
+    法，在方法执行时，执行线程在获取了锁之后仍能连续多次地获得该锁，而不像Mutex由于获
+    取了锁，而在下一次获取锁时出现阻塞自己的情况
+    > 
+    > ReentrantLock虽然没能像synchronized关键字一样支持隐式的重进入，但是在调用lock()方
+    法时，已经获取到锁的线程，能够再次调用lock()方法获取锁而不被阻塞。
+    > 
+    > 这里提到一个锁获取的公平性问题，如果在绝对时间上，先对锁进行获取的请求一定先
+    被满足，那么这个锁是公平的，反之，是不公平的。公平的获取锁，也就是等待时间最长的线
+    程最优先获取锁，也可以说锁获取是顺序的。ReentrantLock提供了一个构造函数，能够控制锁
+    是否是公平的。
+    > 
+    > 事实上，公平的锁机制往往没有非公平的效率高，但是，并不是任何场景都是以TPS作为
+    唯一的指标，公平锁能够减少“饥饿”发生的概率，等待越久的请求越是能够得到优先满足
+    > 
+    > 下面将着重分析ReentrantLock是如何实现重进入和公平性获取锁的特性，并通过测试来
+    验证公平性获取锁对性能的影响
+     
+    - 1:实现重进入 
+      > 重进入是指任意线程在获取到锁之后能够再次获取该锁而不会被锁所阻塞，该特性的实现需要解决以下两个问题。
+      > 
+      > 1：线程再次获取锁：锁需要去识别获取锁的线程是否为当前占据锁的线程，如果是，则再次成功获取
+      > 
+      > 2：锁的最终释放：线程重复n次获取了锁，随后在第n次释放该锁后，其他线程能够获取到
+      该锁。锁的最终释放要求锁对于获取进行计数自增，计数表示当前锁被重复获取的次数，而锁
+      被释放时，计数自减，当计数等于0时表示锁已经成功释放
+      > 
+      > ReentrantLock是通过组合自定义同步器来实现锁的获取与释放，以非公平性（默认的）实
+      现为例，获取同步状态的代码如下。
+      ```
+          final boolean nonfairTryAcquire(int acquires) {
+                   final Thread current = Thread.currentThread();
+                   int c = getState();
+                   if (c == 0) {
+                      if (compareAndSetState(0, acquires)) {
+                          setExclusiveOwnerThread(current);
+                          return true;
+                      }
+                   } else if (current == getExclusiveOwnerThread()) {
+                     int nextc = c + acquires;
+                     if (nextc < 0)
+                          throw new Error("Maximum lock count exceeded");
+                          setState(nextc);
+                          return true;
+                   }
+                   return false;
+         }
+      该方法增加了再次获取同步状态的处理逻辑：通过判断当前线程是否为获取锁的线程来
+      决定获取操作是否成功，如果是获取锁的线程再次请求，则将同步状态值进行增加并返回
+      true，表示获取同步状态成功
+     ``` 
+     > 成功获取锁的线程再次获取锁，只是增加了同步状态值，这也就要求ReentrantLock在释放同步状态时减少同步状态值 
+     ```
+     ```
+      protected final boolean tryRelease(int releases) {
+                 int c = getState() - releases;
+                 if (Thread.currentThread() != getExclusiveOwnerThread())
+                        throw new IllegalMonitorStateException();
+                 boolean free = false;
+                 if (c == 0) {
+                        free = true;
+                        setExclusiveOwnerThread(null);
+                 }
+                 setState(c);
+                 return free;
+      }
+      如果该锁被获取了n次，那么前(n-1)次tryRelease(int releases)方法必须返回false，而只有同
+      步状态完全释放了，才能返回true。可以看到，该方法将同步状态是否为0作为最终释放的条
+      件，当同步状态为0时，将占有线程设置为null，并返回true，表示释放成功。
+     ```
 
 - java并发编程实践
