@@ -1260,10 +1260,37 @@
     工作。LockSupport定义了一组的公共静态方法，这些方法提供了最基本的线程阻塞和唤醒功
     能，而LockSupport也成为构建同步组件的基础工具
     > 
-    >
+    > LockSupport定义了一组以park开头的方法用来阻塞当前线程，以及unpark(Thread thread)
+    方法来唤醒一个被阻塞的线程。Park有停车的意思，假设线程为车辆，那么park方法代表着停
+    车，而unpark方法则是指车辆启动离开，这些方法以及描述如表5-10所示
+    ![img_11.png](img_11.png)
     > 
+    > 对比parkNanos(long nanos)方法和parkNanos(Object blocker,long nanos)方
+    法来展示阻塞对象blocker的用处,内容都是阻塞当前线程10秒，但从线程
+    dump结果可以看出，有阻塞对象的parkNanos方法能够传递给开发人员更多的现场信息。这是
+    由于在Java 5之前，当线程阻塞（使用synchronized关键字）在一个对象上时，通过线程dump能够
+    查看到该线程的阻塞对象，方便问题定位，而Java 5推出的Lock等并发工具时却遗漏了这一
+    点，致使在线程dump时无法提供阻塞对象的信息。因此，在Java 6中，LockSupport新增了上述3
+    个含有阻塞对象的park方法，用以替代原有的park方法
     > 
+  - 55:Condition接口
+    > 任意一个Java对象，都拥有一组监视器方法（定义在java.lang.Object上），主要包括wait()、
+    wait(long timeout)、notify()以及notifyAll()方法，这些方法与synchronized同步关键字配合，可以
+    实现等待/通知模式。Condition接口也提供了类似Object的监视器方法，与Lock配合可以实现等
+    待/通知模式，但是这两者在使用方式以及功能特性上还是有差别的,通过对比Object的监视器方法和Condition接口，可以更详细地了解Condition的特性，对比
+    项与结果如表5-12所示
+    ![img_12.png](img_12.png)
+    - 1:Condition接口与示例
+    > Condition定义了等待/通知两种类型的方法，当前线程调用这些方法时，需要提前获取到
+    Condition对象关联的锁。Condition对象是由Lock对象（调用Lock对象的newCondition()方法）创
+    建出来的，换句话说，Condition是依赖Lock对象的,Condition的使用方式比较简单，需要注意在调用方法前获取锁，见代码ConditionUseCase.java
     > 
+    > Condition定义的部分方法及描述如下
+    ![img_13.png](img_13.png)
+    > 通过一个有界队列的示例来
+    深入了解Condition的使用方式。有界队列是一种特殊的队列，当队列为空时，队列的获取操作
+    将会阻塞获取线程，直到队列中有新增元素，当队列已满时，队列的插入操作将会阻塞插入线
+    程，直到队列出现“空位”，代码如BoundedQueue.java
     > 
     > 
     > 
