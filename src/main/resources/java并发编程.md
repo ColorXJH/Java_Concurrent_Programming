@@ -1513,17 +1513,283 @@
   从而提高容器的存取效率。假如散列的质量差到极点，那么所有的元素都在一个Segment中，
   不仅存取元素缓慢，分段锁也会失去意义
   ``` 
+  > ConcurrentHashMap通过以下散列算法定位segment
+  ```
+  final Segment<K,V> segmentFor(int hash) {
+    return segments[(hash >>> segmentShift) & segmentMask];
+  }
+  默认情况下segmentShift为28，segmentMask为15，再散列后的数最大是32位二进制数据，
+  向右无符号移动28位，意思是让高4位参与到散列运算中，（hash>>>segmentShift）
+  &segmentMask的运算结果分别是4、15、7和8，可以看到散列值没有发生冲突。
+  ```
+  - 5:ConcurrentHashMap的操作 
+  > 介绍ConcurrentHashMap的3种操作——get操作、put操作和size操作。
+  ```
+  1.get操作
+    Segment的get操作实现非常简单和高效。先经过一次再散列，然后使用这个散列值通过散
+    列运算定位到Segment，再通过散列算法定位到元素，代码如下。
+    public V get(Object key) {
+      int hash = hash(key.hashCode());
+      return segmentFor(hash).get(key, hash);
+    }
+    get操作的高效之处在于整个get过程不需要加锁，除非读到的值是空才会加锁重读。我们
+    知道HashTable容器的get方法是需要加锁的，那么ConcurrentHashMap的get操作是如何做到不
+    加锁的呢？原因是它的get方法里将要使用的共享变量都定义成volatile类型，如用于统计当前
+    Segement大小的count字段和用于存储值的HashEntry的value。定义成volatile的变量，能够在线
+    程之间保持可见性，能够被多线程同时读，并且保证不会读到过期的值，但是只能被单线程写
+    （有一种情况可以被多线程写，就是写入的值不依赖于原值），在get操作里只需要读不需要写
+    共享变量count和value，所以可以不用加锁。之所以不会读到过期的值，是因为根据Java内存模
+    型的happen before原则，对volatile字段的写入操作先于读操作，即使两个线程同时修改和获取
+    volatile变量，get操作也能拿到最新的值，这是用volatile替换锁的经典应用场景。
+  
+    transient volatile int count;
+    volatile V value;
+    
+    在定位元素的代码里我们可以发现，定位HashEntry和定位Segment的散列算法虽然一样，
+    都与数组的长度减去1再相“与”，但是相“与”的值不一样，定位Segment使用的是元素的
+    hashcode通过再散列后得到的值的高位，而定位HashEntry直接使用的是再散列后的值。其目的
+    是避免两次散列后的值一样，虽然元素在Segment里散列开了，但是却没有在HashEntry里散列
+    开。
+    hash >>> segmentShift) & segmentMask　　// 定位Segment所使用的hash算法
+    int index = hash & (tab.length - 1);　　// 定位HashEntry所使用的hash算法
+  
+  2.put操作
+    由于put方法里需要对共享变量进行写入操作，所以为了线程安全，在操作共享变量时必
+    须加锁。put方法首先定位到Segment，然后在Segment里进行插入操作。插入操作需要经历两个
+    步骤，第一步判断是否需要对Segment里的HashEntry数组进行扩容，第二步定位添加元素的位
+    置，然后将其放在HashEntry数组里。
+    （1）是否需要扩容
+    在插入元素前会先判断Segment里的HashEntry数组是否超过容量（threshold），如果超过阈
+    值，则对数组进行扩容。值得一提的是，Segment的扩容判断比HashMap更恰当，因为HashMap
+    是在插入元素后判断元素是否已经到达容量的，如果到达了就进行扩容，但是很有可能扩容
+    之后没有新元素插入，这时HashMap就进行了一次无效的扩容。  
+    （2）如何扩容
+    在扩容的时候，首先会创建一个容量是原来容量两倍的数组，然后将原数组里的元素进
+    行再散列后插入到新的数组里。为了高效，ConcurrentHashMap不会对整个容器进行扩容，而只
+    对某个segment进行扩容。
+  
+  3.size操作
+    如果要统计整个ConcurrentHashMap里元素的大小，就必须统计所有Segment里元素的大小
+    后求和。Segment里的全局变量count是一个volatile变量，那么在多线程场景下，是不是直接把
+    所有Segment的count相加就可以得到整个ConcurrentHashMap大小了呢？不是的，虽然相加时
+    可以获取每个Segment的count的最新值，但是可能累加前使用的count发生了变化，那么统计结
+    果就不准了。所以，最安全的做法是在统计size的时候把所有Segment的put、remove和clean方法
+    全部锁住，但是这种做法显然非常低效。
+    
+    因为在累加count操作过程中，之前累加过的count发生变化的几率非常小，所以
+    ConcurrentHashMap的做法是先尝试2次通过不锁住Segment的方式来统计各个Segment大小，如
+    果统计的过程中，容器的count发生了变化，则再采用加锁的方式来统计所有Segment的大小。
+  
+    那么ConcurrentHashMap是如何判断在统计的时候容器是否发生了变化呢？使用modCount
+    变量，在put、remove和clean方法里操作元素前都会将变量modCount进行加1，那么在统计size
+    前后比较modCount是否发生变化，从而得知容器的大小是否发生变化。
+  ``` 
+  - 59:ConcurrentLinkedQueue
+  > 在并发编程中，有时候需要使用线程安全的队列。如果要实现一个线程安全的队列有两
+  种方式：一种是使用阻塞算法，另一种是使用非阻塞算法。使用阻塞算法的队列可以用一个锁
+  （入队和出队用同一把锁）或两个锁（入队和出队用不同的锁）等方式来实现。非阻塞的实现方
+  式则可以使用循环CAS的方式来实现。本节让我们一起来研究一下Doug Lea是如何使用非阻
+  塞的方式来实现线程安全队列ConcurrentLinkedQueue的，相信从大师身上我们能学到不少并
+  发编程的技巧。
+  > 
+  > ConcurrentLinkedQueue是一个基于链接节点的无界线程安全队列，它采用先进先出的规
+  则对节点进行排序，当我们添加一个元素的时候，它会添加到队列的尾部；当我们获取一个元
+  素时，它会返回队列头部的元素。它采用了“wait-free”算法（即CAS算法）来实现，该算法在
+  Michael&Scott算法上进行了一些修改
+  - 1:ConcurrentLinkedQueue的结构
+  > 通过ConcurrentLinkedQueue的类图来分析一下它的结构，如图6-3所示。
+  ![img_20.png](img_20.png)
+  > ConcurrentLinkedQueue由head节点和tail节点组成，每个节点（Node）由节点元素（item）和
+  指向下一个节点（next）的引用组成，节点与节点之间就是通过这个next关联起来，从而组成一
+  张链表结构的队列。默认情况下head节点存储的元素为空，tail节点等于head节点。 private transient volatile Node<E> tail = head;
+  - 2:入队列 
+  > 本节将介绍入队列的相关知识
+  ```
+  1.入队列的过程
+    入队列就是将入队节点添加到队列的尾部。为了方便理解入队时队列的变化，以及head节
+    点和tail节点的变化，这里以一个示例来展开介绍。假设我们想在一个队列中依次插入4个节
+    点，为了帮助大家理解，每添加一个节点就做了一个队列的快照图，如图6-4所示。  ,过程如下：
+    ·添加元素1。队列更新head节点的next节点为元素1节点。又因为tail节点默认情况下等于head节点，所以它们的next节点都指向元素1节点。
+    ·添加元素2。队列首先设置元素1节点的next节点为元素2节点，然后更新tail节点指向元素2节点。
+    ·添加元素3，设置tail节点的next节点为元素3节点。
+    ·添加元素4，设置元素3的next节点为元素4节点，然后将tail节点指向元素4节点。
+  
+  ``` 
+  ![img_21.png](img_21.png)
+  > 通过调试入队过程并观察head节点和tail节点的变化，发现入队主要做两件事情：第一是
+  将入队节点设置成当前队列尾节点的下一个节点；第二是更新tail节点，如果tail节点的next节
+  点不为空，则将入队节点设置成tail节点，如果tail节点的next节点为空，则将入队节点设置成
+  tail的next节点，所以tail节点不总是尾节点（理解这一点对于我们研究源码会非常有帮助）。
+  > 
+  > 通过对上面的分析，我们从单线程入队的角度理解了入队过程，但是多个线程同时进行
+  入队的情况就变得更加复杂了，因为可能会出现其他线程插队的情况。如果有一个线程正在
+  入队，那么它必须先获取尾节点，然后设置尾节点的下一个节点为入队节点，但这时可能有另
+  外一个线程插队了，那么队列的尾节点就会发生变化，这时当前线程要暂停入队操作，然后重
+  新获取尾节点。让我们再通过源码来详细分析一下它是如何使用CAS算法来入队的。
+  ```
+  public boolean offer(E e) {
+    if (e == null) throw new NullPointerException();
+    // 入队前，创建一个入队节点
+    Node<E> n = new Node<E>(e);
+    retry:
+    // 死循环，入队不成功反复入队。
+    for (;;) {
+        // 创建一个指向tail节点的引用
+        Node<E> t = tail;
+        // p用来表示队列的尾节点，默认情况下等于tail节点。
+        Node<E> p = t;
+        for (int hops = 0; ; hops++) {
+            // 获得p节点的下一个节点。
+            Node<E> next = succ(p);
+            // next节点不为空，说明p不是尾节点，需要更新p后在将它指向next节点
+            if (next != null) {
+                // 循环了两次及其以上，并且当前节点还是不等于尾节点
+                if (hops > HOPS && t != tail)
+                   continue retry;
+                p = next;
+            }
+            // 如果p是尾节点，则设置p节点的next节点为入队节点。
+            else if (p.casNext(null, n)) {
+            /*如果tail节点有大于等于1个next节点，则将入队节点设置成tail节点，
+            更新失败了也没关系，因为失败了表示有其他线程成功更新了tail节点*/
+               if (hops >= HOPS)
+                  casTail(t, n); // 更新tail节点，允许失败
+               return true;
+            }
+            // p有next节点,表示p的next节点是尾节点，则重新设置p节点
+            else {
+               p = succ(p);
+            }
+        }
+    }
+  }
+  从源代码角度来看，整个入队过程主要做两件事情：第一是定位出尾节点；第二是使用
+  CAS算法将入队节点设置成尾节点的next节点，如不成功则重试
+  
+  2:定位尾节点
+    tail节点并不总是尾节点，所以每次入队都必须先通过tail节点来找到尾节点。尾节点可能
+    是tail节点，也可能是tail节点的next节点。代码中循环体中的第一个if就是判断tail是否有next节
+    点，有则表示next节点可能是尾节点。获取tail节点的next节点需要注意的是p节点等于p的next
+    节点的情况，只有一种可能就是p节点和p的next节点都等于空，表示这个队列刚初始化，正准
+    备添加节点，所以需要返回head节点。获取p节点的next节点代码如下。
+    final Node<E> succ(Node<E> p) {
+      Node<E> next = p.getNext();
+      return (p == next) head : next;
+    }
+  
+  3.设置入队节点为尾节点
+    p.casNext（null，n）方法用于将入队节点设置为当前队列尾节点的next节点，如果p是null，
+    表示p是当前队列的尾节点，如果不为null，表示有其他线程更新了尾节点，则需要重新获取当
+    前队列的尾节点。
+  
+  4.HOPS的设计意图
+    上面分析过对于先进先出的队列入队所要做的事情是将入队节点设置成尾节点，doug lea
+    写的代码和逻辑还是稍微有点复杂。那么，我用以下方式来实现是否可行？
+    public boolean offer(E e) {
+      if (e == null)
+        throw new NullPointerException();
+      Node<E> n = new Node<E>(e);
+      for (;;) {
+        Node<E> t = tail;
+        if (t.casNext(null, n) && casTail(t, n)) {
+          return true;
+        }
+      }
+    }
+    让tail节点永远作为队列的尾节点，这样实现代码量非常少，而且逻辑清晰和易懂。但是，
+    这么做有个缺点，每次都需要使用循环CAS更新tail节点。如果能减少CAS更新tail节点的次
+    数，就能提高入队的效率，所以doug lea使用hops变量来控制并减少tail节点的更新频率，并不
+    是每次节点入队后都将tail节点更新成尾节点，而是当tail节点和尾节点的距离大于等于常量
+    HOPS的值（默认等于1）时才更新tail节点，tail和尾节点的距离越长，使用CAS更新tail节点的次
+    数就会越少，但是距离越长带来的负面效果就是每次入队时定位尾节点的时间就越长，因为
+    循环体需要多循环一次来定位出尾节点，但是这样仍然能提高入队的效率，因为从本质上来
+    看它通过增加对volatile变量的读操作来减少对volatile变量的写操作，而对volatile变量的写操
+    作开销要远远大于读操作，所以入队效率会有所提升。
+    private static final int HOPS = 1;
+    注意　入队方法永远返回true，所以不要通过返回值判断入队是否成功。
+  ```
+  - 3:出队列
+  > 出队列的就是从队列里返回一个节点元素，并清空该节点对元素的引用。让我们通过每
+  个节点出队的快照来观察一下head节点的变化，如图6-5所示。
+  从图中可知，并不是每次出队时都更新head节点，当head节点里有元素时，直接弹出head
+  节点里的元素，而不会更新head节点。只有当head节点里没有元素时，出队操作才会更新head
+  节点。这种做法也是通过hops变量来减少使用CAS更新head节点的消耗，从而提高出队效率。
+  让我们再通过源码来深入分析下出队过程。
+  ![img_22.png](img_22.png) 
+  ```
+  public E poll() {
+    Node<E> h = head;
+    // p表示头节点，需要出队的节点
+    Node<E> p = h;
+    for (int hops = 0;; hops++) {
+      // 获取p节点的元素
+      E item = p.getItem();
+      // 如果p节点的元素不为空，使用CAS设置p节点引用的元素为null,
+      // 如果成功则返回p节点的元素。
+      if (item != null && p.casItem(item, null)) {
+        if (hops >= HOPS) {
+          // 将p节点下一个节点设置成head节点
+          Node<E> q = p.getNext();
+          updateHead(h, (q != null) q : p);
+        }
+        return item;
+      }
+      // 如果头节点的元素为空或头节点发生了变化，这说明头节点已经被另外
+      // 一个线程修改了。那么获取p节点的下一个节点
+      Node<E> next = succ(p);
+      // 如果p的下一个节点也为空，说明这个队列已经空了
+      if (next == null) {
+        // 更新头节点。
+        updateHead(h, p);
+        break;
+      }
+      // 如果下一个元素不为空，则将头节点的下一个节点设置成头节点
+      p = next;
+    }
+    return null;
+  }
+  首先获取头节点的元素，然后判断头节点元素是否为空，如果为空，表示另外一个线程已
+  经进行了一次出队操作将该节点的元素取走，如果不为空，则使用CAS的方式将头节点的引
+  用设置成null，如果CAS成功，则直接返回头节点的元素，如果不成功，表示另外一个线程已经
+  进行了一次出队操作更新了head节点，导致元素发生了变化，需要重新获取头节点。
+  ```
+  - 60:Java中的阻塞队列 
+  > 介绍什么是阻塞队列，以及Java中阻塞队列的4种处理方式，并介绍Java 7中提供的
+  7种阻塞队列，最后分析阻塞队列的一种实现方式。
+  - 1:什么是阻塞队列 
+  > 阻塞队列（BlockingQueue）是一个支持两个附加操作的队列。这两个附加的操作支持阻塞
+  的插入和移除方法
+  ```
+  1）支持阻塞的插入方法：意思是当队列满时，队列会阻塞插入元素的线程，直到队列不满。
+  2）支持阻塞的移除方法：意思是在队列为空时，获取元素的线程会等待队列变为非空。
+  阻塞队列常用于生产者和消费者的场景，生产者是向队列里添加元素的线程，消费者是
+  从队列里取元素的线程。阻塞队列就是生产者用来存放元素、消费者用来获取元素的容器。
+  在阻塞队列不可用时，这两个附加操作提供了4种处理方式，如表6-1所示
+  ```
+  ![img_23.png](img_23.png)
+  ```
+  ·抛出异常：当队列满时，如果再往队列里插入元素，会抛出IllegalStateException（"Queue
+    full"）异常。当队列空时，从队列里获取元素会抛出NoSuchElementException异常。
+  ·返回特殊值：当往队列插入元素时，会返回元素是否插入成功，成功返回true。如果是移
+    除方法，则是从队列里取出一个元素，如果没有则返回null。
+  ·一直阻塞：当阻塞队列满时，如果生产者线程往队列里put元素，队列会一直阻塞生产者
+    线程，直到队列可用或者响应中断退出。当队列空时，如果消费者线程从队列里take元素，队
+    列会阻塞住消费者线程，直到队列不为空。
+  ·超时退出：当阻塞队列满时，如果生产者线程往队列里插入元素，队列会阻塞生产者线程
+   一段时间，如果超过了指定的时间，生产者线程就会退出。
+  
+  这两个附加操作的4种处理方式不方便记忆，所以我找了一下这几个方法的规律。put和
+  take分别尾首含有字母t，offer和poll都含有字母o。
+  
+  注意　如果是无界阻塞队列，队列不可能会出现满的情况，所以使用put或offer方法永
+  远不会被阻塞，而且使用offer方法时，该方法永远返回true。
+  ``` 
+  - 2:Java里的阻塞队列
   > 
   > 
   > 
   > 
   > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
+
     
 - java并发编程实践
