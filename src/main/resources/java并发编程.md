@@ -1838,19 +1838,204 @@
     DelayQueue队列的元素必须实现Delayed接口。我们可以参考ScheduledThreadPoolExecutor
     里ScheduledFutureTask类的实现，一共有三步。
       第一步：在对象创建的时候，初始化基本数据。使用time记录当前对象延迟到什么时候可
-      以使用，使用sequenceNumber来标识元素在队列中的先后顺序。代码如下。
+      以使用，使用sequenceNumber来标识元素在队列中的先后顺序。
+  ```
+  ![img_24.png](img_24.png)
+  ```
+      第二步：实现getDelay方法，该方法返回当前元素还需要延时多长时间，单位是纳秒，代码
+      如下。
+      通过构造函数可以看出延迟时间参数ns的单位是纳秒，自己设计的时候最好使用纳秒，因
+      为实现getDelay()方法时可以指定任意单位，一旦以秒或分作为单位，而延时时间又精确不到
+      纳秒就麻烦了。使用时请注意当time小于当前时间时，getDelay会返回负数。
+  ```
+  ![img_25.png](img_25.png)
+  ``` 
+      第三步：实现compareTo方法来指定元素的顺序。例如，让延时时间最长的放在队列的末
+      尾
+  ```
+  ![img_26.png](img_26.png)
+  ``` 
+  2：如何实现延时阻塞队列
+    延时阻塞队列的实现很简单，当消费者从队列里获取元素时，如果元素没有达到延时时
+    间，就阻塞当前线程
+  ```
+  ![img_27.png](img_27.png)
+  ``` 
+    代码中的变量leader是一个等待获取队列头部元素的线程。如果leader不等于空，表示已
+    经有线程在等待获取队列的头元素。所以，使用await()方法让当前线程等待信号。如果leader
+    等于空，则把当前线程设置成leader，并使用awaitNanos()方法让当前线程等待接收信号或等
+    待delay时间
+  ``` 
+  - 5.SynchronousQueue
+  > SynchronousQueue是一个不存储元素的阻塞队列。每一个put操作必须等待一个take操作，
+  否则不能继续添加元素。
+  它支持公平访问队列。默认情况下线程采用非公平性策略访问队列。使用以下构造方法
+  可以创建公平性访问的SynchronousQueue，如果设置为true，则等待的线程会采用先进先出的
+  顺序访问队列。
+  ```
+  public SynchronousQueue(boolean fair) {
+     transferer = fair new TransferQueue() : new TransferStack();
+  }
+  ``` 
+  > SynchronousQueue可以看成是一个传球手，负责把生产者线程处理的数据直接传递给消费
+  者线程。队列本身并不存储任何元素，非常适合传递性场景。SynchronousQueue的吞吐量高于
+  LinkedBlockingQueue和ArrayBlockingQueue。
+  - 6.LinkedTransferQueue 
+  > LinkedTransferQueue是一个由链表结构组成的无界阻塞TransferQueue队列。相对于其他阻
+  塞队列，LinkedTransferQueue多了tryTransfer和transfer方法。
+  ```
+  （1）transfer方法
+    如果当前有消费者正在等待接收元素（消费者使用take()方法或带时间限制的poll()方法
+    时），transfer方法可以把生产者传入的元素立刻transfer（传输）给消费者。如果没有消费者在等
+    待接收元素，transfer方法会将元素存放在队列的tail节点，并等到该元素被消费者消费了才返
+    回。transfer方法的关键代码如下。
+  
+    Node pred = tryAppend(s, haveData);
+    return awaitMatch(s, pred, e, (how == TIMED), nanos);
+  
+    第一行代码是试图把存放当前元素的s节点作为tail节点。第二行代码是让CPU自旋等待
+    消费者消费元素。因为自旋会消耗CPU，所以自旋一定的次数后使用Thread.yield()方法来暂停
+    当前正在执行的线程，并执行其他线程。
+  
+  （2）tryTransfer方法
+    tryTransfer方法是用来试探生产者传入的元素是否能直接传给消费者。如果没有消费者等
+    待接收元素，则返回false。和transfer方法的区别是tryTransfer方法无论消费者是否接收，方法
+    立即返回，而transfer方法是必须等到消费者消费了才返回。
+    
+    对于带有时间限制的tryTransfer（E e，long timeout，TimeUnit unit）方法，试图把生产者传入
+    的元素直接传给消费者，但是如果没有消费者消费该元素则等待指定的时间再返回，如果超
+    时还没消费元素，则返回false，如果在超时时间内消费了元素，则返回true。
+  ``` 
+  - 7.LinkedBlockingDeque
+  > LinkedBlockingDeque是一个由链表结构组成的双向阻塞队列。所谓双向队列指的是可以
+  从队列的两端插入和移出元素。双向队列因为多了一个操作队列的入口，在多线程同时入队
+  时，也就减少了一半的竞争。相比其他的阻塞队列，LinkedBlockingDeque多了addFirst、
+  addLast、offerFirst、offerLast、peekFirst和peekLast等方法，以First单词结尾的方法，表示插入、
+  获取（peek）或移除双端队列的第一个元素。以Last单词结尾的方法，表示插入、获取或移除双
+  端队列的最后一个元素。另外，插入方法add等同于addLast，移除方法remove等效于
+  removeFirst。但是take方法却等同于takeFirst，不知道是不是JDK的bug，使用时还是用带有First
+  和Last后缀的方法更清楚。
+  > 
+  > 在初始化LinkedBlockingDeque时可以设置容量防止其过度膨胀。另外，双向阻塞队列可以
+  运用在“工作窃取”模式中。
+   
+  - 3:阻塞队列的实现原理 
+  > 如果队列是空的，消费者会一直等待，当生产者添加元素时，消费者是如何知道当前队列
+  有元素的呢？如果让你来设计阻塞队列你会如何设计，如何让生产者和消费者进行高效率的
+  通信呢？让我们先来看看JDK是如何实现的。
+  > 
+  > 使用通知模式实现。所谓通知模式，就是当生产者往满的队列里添加元素时会阻塞住生
+  产者，当消费者消费了一个队列中的元素后，会通知生产者当前队列可用。通过查看JDK源码
+  发现ArrayBlockingQueue使用了Condition来实现，代码如下。
+  ![img_28.png](img_28.png)
+  > 当往队列里插入一个元素时，如果队列不可用，那么阻塞生产者主要通过
+  LockSupport.park（this）来实现。
+  ![img_31.png](img_29.png)
+  > 继续进入源码，发现调用setBlocker先保存一下将要阻塞的线程，然后调用unsafe.park阻塞
+  当前线程。
+  ![img_30.png](img_30.png)
+  > unsafe.park是个native方法，代码如下。
+  ![img_31.png](img_31.png) 
+  > park这个方法会阻塞当前线程，只有以下4种情况中的一种发生时，该方法才会返回。
+  ·与park对应的unpark执行或已经执行时。“已经执行”是指unpark先执行，然后再执行park
+  的情况。
+  ·线程被中断时。
+  ·等待完time参数指定的毫秒数时。
+  ·异常现象发生时，这个异常现象没有任何原因。
+  > 
+  > 继续看一下JVM是如何实现park方法：park在不同的操作系统中使用不同的方式实现，在
+  Linux下使用的是系统方法pthread_cond_wait实现。实现代码在JVM源码路径
+  src/os/linux/vm/os_linux.cpp里的os::PlatformEvent::park方法，代码如下。
+  ![img_32.png](img_32.png)
+  > pthread_cond_wait是一个多线程的条件变量函数，cond是condition的缩写，字面意思可以
+  理解为线程在等待一个条件发生，这个条件是一个全局变量。这个方法接收两个参数：一个共
+  享变量_cond，一个互斥量_mutex。而unpark方法在Linux下是使用pthread_cond_signal实现的。
+  park方法在Windows下则是使用WaitForSingleObject实现的。想知道pthread_cond_wait是如何实
+  现的，可以参考glibc-2.5的nptl/sysdeps/pthread/pthread_cond_wait.c。
+  > 
+  > 当线程被阻塞队列阻塞时，线程会进入WAITING（parking）状态。我们可以使用jstack dump
+  阻塞的生产者线程看到这点，如下。
+  ![img_33.png](img_33.png)
+   
+  - 61:Fork/Join框架 
+  > 介绍Fork/Join框架的基本原理、算法、设计方式、应用与实现等
+  ```
+  1:什么是Fork/Join框架
+    Fork/Join框架是Java 7提供的一个用于并行执行任务的框架，是一个把大任务分割成若干
+    个小任务，最终汇总每个小任务结果后得到大任务结果的框架。
+    
+    我们再通过Fork和Join这两个单词来理解一下Fork/Join框架。Fork就是把一个大任务切分
+    为若干子任务并行的执行，Join就是合并这些子任务的执行结果，最后得到这个大任务的结
+    果。比如计算1+2+…+10000，可以分割成10个子任务，每个子任务分别对1000个数进行求和，
+    最终汇总这10个子任务的结果。Fork/Join的运行流程如图6-6所示
+  ``` 
+  ![img_34.png](img_34.png)
+  ```
+  2:工作窃取算法
+    工作窃取（work-stealing）算法是指某个线程从其他队列里窃取任务来执行。那么，为什么
+    需要使用工作窃取算法呢？假如我们需要做一个比较大的任务，可以把这个任务分割为若干
+    互不依赖的子任务，为了减少线程间的竞争，把这些子任务分别放到不同的队列里，并为每个
+    队列创建一个单独的线程来执行队列里的任务，线程和队列一一对应。比如A线程负责处理A
+    队列里的任务。但是，有的线程会先把自己队列里的任务干完，而其他线程对应的队列里还有
+    任务等待处理。干完活的线程与其等着，不如去帮其他线程干活，于是它就去其他线程的队列
+    里窃取一个任务来执行。而在这时它们会访问同一个队列，所以为了减少窃取任务线程和被
+    窃取任务线程之间的竞争，通常会使用双端队列，被窃取任务线程永远从双端队列的头部拿
+    任务执行，而窃取任务的线程永远从双端队列的尾部拿任务执行。
+  ``` 
+  ![img_35.png](img_35.png)
+  > 工作窃取算法的优点：充分利用线程进行并行计算，减少了线程间的竞争。
+  > 
+  > 工作窃取算法的缺点：在某些情况下还是存在竞争，比如双端队列里只有一个任务时。并
+  且该算法会消耗了更多的系统资源，比如创建多个线程和多个双端队列。
+  ```
+  3:Fork/Join框架的设计
+    我们已经很清楚Fork/Join框架的需求了，那么可以思考一下，如果让我们来设计一个
+    Fork/Join框架，该如何设计？这个思考有助于你理解Fork/Join框架的设计。
+  
+    步骤1　分割任务。首先我们需要有一个fork类来把大任务分割成子任务，有可能子任务还
+    是很大，所以还需要不停地分割，直到分割出的子任务足够小。
+  
+    步骤2　执行任务并合并结果。分割的子任务分别放在双端队列里，然后几个启动线程分
+    别从双端队列里获取任务执行。子任务执行完的结果都统一放在一个队列里，启动一个线程
+    从队列里拿数据，然后合并这些数据。
+    
+    Fork/Join使用两个类来完成以上两件事情。
+      
+    ①ForkJoinTask：我们要使用ForkJoin框架，必须首先创建一个ForkJoin任务。它提供在任务
+     中执行fork()和join()操作的机制。通常情况下，我们不需要直接继承ForkJoinTask类，只需要继
+     承它的子类，Fork/Join框架提供了以下两个子类。
+     ·RecursiveAction：用于没有返回结果的任务。
+     ·RecursiveTask：用于有返回结果的任务。
+    ②ForkJoinPool：ForkJoinTask需要通过ForkJoinPool来执行。
+     任务分割出的子任务会添加到当前工作线程所维护的双端队列中，进入队列的头部。当
+     一个工作线程的队列里暂时没有任务时，它会随机从其他工作线程的队列的尾部获取一个任
+     务。
+  
+  4:使用Fork/Join框架
+    让我们通过一个简单的需求来使用Fork/Join框架，需求是：计算1+2+3+4的结果。
+  
+    使用Fork/Join框架首先要考虑到的是如何分割任务，如果希望每个子任务最多执行两个
+    数的相加，那么我们设置分割的阈值是2，由于是4个数字相加，所以Fork/Join框架会把这个任
+    务fork成两个子任务，子任务一负责计算1+2，子任务二负责计算3+4，然后再join两个子任务
+    的结果。因为是有结果的任务，所以必须继承RecursiveTask，实现代码如下:见：CountTask.java
+  
+  5:Fork/Join框架的异常处理
+    ForkJoinTask在执行的时候可能会抛出异常，但是我们没办法在主线程里直接捕获异常，
+    所以ForkJoinTask提供了isCompletedAbnormally()方法来检查任务是否已经抛出异常或已经被
+    取消了，并且可以通过ForkJoinTask的getException方法获取异常。使用如下代码。
+    
+    if(task.isCompletedAbnormally())
+    {
+      System.out.println(task.getException());
+    }
+    getException方法返回Throwable对象，如果任务被取消了则返回CancellationException。如
+    果任务没有完成或者没有抛出异常则返回null。
+  
+  6:Fork/Join框架的实现原理
+    ForkJoinPool由ForkJoinTask数组和ForkJoinWorkerThread数组组成，ForkJoinTask数组负责
+    存放程序提交给ForkJoinPool的任务，而ForkJoinWorkerThread数组负责执行这些任务。
   
   ``` 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
-  > 
   > 
   > 
   > 
