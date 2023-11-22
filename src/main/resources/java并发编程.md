@@ -1785,6 +1785,71 @@
   远不会被阻塞，而且使用offer方法时，该方法永远返回true。
   ``` 
   - 2:Java里的阻塞队列
+  ```
+  JDK 7提供了7个阻塞队列，如下。
+   ·ArrayBlockingQueue：一个由数组结构组成的有界阻塞队列。
+   ·LinkedBlockingQueue：一个由链表结构组成的有界阻塞队列。
+   ·PriorityBlockingQueue：一个支持优先级排序的无界阻塞队列。
+   ·DelayQueue：一个使用优先级队列实现的无界阻塞队列。
+   ·SynchronousQueue：一个不存储元素的阻塞队列。
+   ·LinkedTransferQueue：一个由链表结构组成的无界阻塞队列。
+   ·LinkedBlockingDeque：一个由链表结构组成的双向阻塞队列。
+  ```
+  - 1.ArrayBlockingQueue
+  > ArrayBlockingQueue是一个用数组实现的有界阻塞队列。此队列按照先进先出（FIFO）的原
+  则对元素进行排序。
+  默认情况下不保证线程公平的访问队列，所谓公平访问队列是指阻塞的线程，可以按照
+  阻塞的先后顺序访问队列，即先阻塞线程先访问队列。非公平性是对先等待的线程是非公平
+  的，当队列可用时，阻塞的线程都可以争夺访问队列的资格，有可能先阻塞的线程最后才访问
+  队列。为了保证公平性，通常会降低吞吐量。我们可以使用以下代码创建一个公平的阻塞队
+  列。ArrayBlockingQueue fairQueue = new ArrayBlockingQueue(1000,true);
+  > 
+  > 访问者的公平性是使用可重入锁实现的，代码如下。
+  ```
+  public ArrayBlockingQueue(int capacity, boolean fair) {
+    if (capacity <= 0)
+      throw new IllegalArgumentException();
+    this.items = new Object[capacity];
+    lock = new ReentrantLock(fair);
+    notEmpty = lock.newCondition();
+    notFull = lock.newCondition();
+  }
+  ```
+  - 2.LinkedBlockingQueue
+  > LinkedBlockingQueue是一个用链表实现的有界阻塞队列。此队列的默认和最大长度为
+  Integer.MAX_VALUE。此队列按照先进先出的原则对元素进行排序。
+  - 3.PriorityBlockingQueue 
+  > PriorityBlockingQueue是一个支持优先级的无界阻塞队列。默认情况下元素采取自然顺序
+  升序排列。也可以自定义类实现compareTo()方法来指定元素排序规则，或者初始化
+  PriorityBlockingQueue时，指定构造参数Comparator来对元素进行排序。需要注意的是不能保证
+  同优先级元素的顺序。
+  - 4.DelayQueue 
+  > DelayQueue是一个支持延时获取元素的无界阻塞队列。队列使用PriorityQueue来实现。队
+  列中的元素必须实现Delayed接口，在创建元素时可以指定多久才能从队列中获取当前元素。
+  只有在延迟期满时才能从队列中提取元素。
+  > 
+  > DelayQueue非常有用，可以将DelayQueue运用在以下应用场景。
+  ·缓存系统的设计：可以用DelayQueue保存缓存元素的有效期，使用一个线程循环查询
+  DelayQueue，一旦能从DelayQueue中获取元素时，表示缓存有效期到了。
+  ·定时任务调度：使用DelayQueue保存当天将会执行的任务和执行时间，一旦从
+  DelayQueue中获取到任务就开始执行，比如TimerQueue就是使用DelayQueue实现的。
+  ```
+  1:如何实现Delayed接口
+    DelayQueue队列的元素必须实现Delayed接口。我们可以参考ScheduledThreadPoolExecutor
+    里ScheduledFutureTask类的实现，一共有三步。
+      第一步：在对象创建的时候，初始化基本数据。使用time记录当前对象延迟到什么时候可
+      以使用，使用sequenceNumber来标识元素在队列中的先后顺序。代码如下。
+  
+  ``` 
+  > 
+  > 
+  > 
+  > 
+  > 
+  > 
+  > 
+  > 
+  > 
   > 
   > 
   > 
