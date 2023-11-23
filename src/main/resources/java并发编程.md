@@ -2034,9 +2034,131 @@
   6:Fork/Join框架的实现原理
     ForkJoinPool由ForkJoinTask数组和ForkJoinWorkerThread数组组成，ForkJoinTask数组负责
     存放程序提交给ForkJoinPool的任务，而ForkJoinWorkerThread数组负责执行这些任务。
+    
+  （1）ForkJoinTask的fork方法实现原理
+    当我们调用ForkJoinTask的fork方法时，程序会调用ForkJoinWorkerThread的pushTask方法
+    异步地执行这个任务，然后立即返回结果。代码如下。
+    public final ForkJoinTask<V> fork() {
+     ((ForkJoinWorkerThread) Thread.currentThread())
+       .pushTask(this);
+     return this;
+    }
   
+    pushTask方法把当前任务存放在ForkJoinTask数组队列里。然后再调用ForkJoinPool的
+    signalWork()方法唤醒或创建一个工作线程来执行任务。代码如下
+  
+    final void pushTask(ForkJoinTask<> t) {
+       ForkJoinTask<>[] q; int s, m;
+       if ((q = queue) != null) {　　　　// ignore if queue removed
+         long u = (((s = queueTop) & (m = q.length - 1)) << ASHIFT) + ABASE;
+         UNSAFE.putOrderedObject(q, u, t);
+         queueTop = s + 1;　　　　　　// or use putOrderedInt
+         if ((s -= queueBase) <= 2)
+            pool.signalWork();
+         else if (s == m)
+         growQueue();
+       }
+    }
+  
+  （2）ForkJoinTask的join方法实现原理
+    Join方法的主要作用是阻塞当前线程并等待获取结果。让我们一起看看ForkJoinTask的join
+    方法的实现，代码如下。
+    public final V join() {
+        if (doJoin() != NORMAL)
+          return reportResult();
+        else
+          return getRawResult();
+    }
+    private V reportResult() {
+        int s; Throwable ex;
+        if ((s = status) == CANCELLED)
+          throw new CancellationException();
+        if (s == EXCEPTIONAL && (ex = getThrowableException()) != null)
+          UNSAFE.throwException(ex);
+        return getRawResult();
+    }
+    首先，它调用了doJoin()方法，通过doJoin()方法得到当前任务的状态来判断返回什么结
+    果，任务状态有4种：已完成（NORMAL）、被取消（CANCELLED）、信号（SIGNAL）和出现异常
+    （EXCEPTIONAL）。
+    ·如果任务状态是已完成，则直接返回任务结果。
+    ·如果任务状态是被取消，则直接抛出CancellationException。
+    ·如果任务状态是抛出异常，则直接抛出对应的异常。
+    让我们再来分析一下doJoin()方法的实现代码。
   ``` 
+  ![img_36.png](img_36.png)
+  > 在doJoin()方法里，首先通过查看任务的状态，看任务是否已经执行完成，如果执行完成，
+  则直接返回任务状态；如果没有执行完，则从任务数组里取出任务并执行。如果任务顺利执行
+  完成，则设置任务状态为NORMAL，如果出现异常，则记录异常，并将任务状态设置为
+  EXCEPTIONAL。
+  - 62:本章小结 
+  > 本章介绍了Java中提供的各种并发容器和框架，并分析了该容器和框架的实现原理，从中
+  我们能够领略到大师级的设计思路，希望读者能够充分理解这种设计思想，并在以后开发的
+  并发程序时，运用上这些并发编程的技巧。
+   
+  - 63:java中的13个原子操作类 
+  > 当程序更新一个变量时，如果多线程同时更新这个变量，可能得到期望之外的值，比如变
+  量i=1，A线程更新i+1，B线程也更新i+1，经过两个线程操作之后可能i不等于3，而是等于2。因
+  为A和B线程在更新变量i的时候拿到的i都是1，这就是线程不安全的更新操作，通常我们会使
+  用synchronized来解决这个问题，synchronized会保证多线程不会同时更新变量i
   > 
+  > 而Java从JDK 1.5开始提供了java.util.concurrent.atomic包（以下简称Atomic包），这个包中
+  的原子操作类提供了一种用法简单、性能高效、线程安全地更新一个变量的方式
+  > 
+  > 因为变量的类型有很多种，所以在Atomic包里一共提供了13个类，属于4种类型的原子更
+  新方式，分别是原子更新基本类型、原子更新数组、原子更新引用和原子更新属性（字段）。
+  Atomic包里的类基本都是使用Unsafe实现的包装类。
+  > 
+  - 64:原子更新基本类型类
+  > 使用原子的方式更新基本类型，Atomic包提供了以下3个类
+  ```
+  AtomicBoolean:原子更新布尔类型
+  AtomicInteger:原子更新整型
+  AtomicLong:原子更新长整形
+    以上3个类提供的方法几乎一模一样，以AtomicInteger为例进行讲解，AtomicInteger的常用方法如下
+    int addAndGet(int delta):以原子的方式将输入的数值与实例中的值（AtomicInteger中的value）相加，并返回结果
+    boolean compareAndSet(int expect,int update):如果输入的数值等于预期值，则以原子的方式将该值设置为更新值
+    int getAndIncrement():以原子方式将当前值加1，注意这里返回的是自增前的值
+    void lazySet(int newValue):最终会设置成newValue,使用lazySet设置值后，可能导致其他线程在之后的一小段时间内还是可以读到旧的值，
+       可以参考如下文章 :
+  ```
+  http://ifeve.com/how-does-atomiclong-lazyset-work/
+  ```
+    int getAndSet(int newValue):以原子的方式设置值为newValue,并返回旧值
+  ```
+  > 查看getAndIncrement()是如何实现原子操作的呢，查看源代码如下:
+  ![img_37.png](img_37.png)
+  > 源码中for循环体的第一步先取得AtomicInteger里存储的数值，第二步对AtomicInteger的当
+  前数值进行加1操作，关键的第三步调用compareAndSet方法来进行原子更新操作，该方法先检
+  查当前数值是否等于current，等于意味着AtomicInteger的值没有被其他线程修改过，则将
+  AtomicInteger的当前数值更新成next的值，如果不等compareAndSet方法会返回false，程序会进
+  入for循环重新进行compareAndSet操作
+  > 
+  > Atomic包提供了3种基本类型的原子更新，但是Java的基本类型里还有char、float和double
+  等。那么问题来了，如何原子的更新其他的基本类型呢？Atomic包里的类基本都是使用Unsafe
+  实现的，让我们一起看一下Unsafe的源码，如代如下
+  ![img_38.png](img_38.png)
+  > 通过代码，我们发现Unsafe只提供了3种CAS方法：compareAndSwapObject、compare-
+  AndSwapInt和compareAndSwapLong，再看AtomicBoolean源码，发现它是先把Boolean转换成整
+  型，再使用compareAndSwapInt进行CAS，所以原子更新char、float和double变量也可以用类似
+  的思路来实现
+  - 65:原子更新数组 
+  > 通过原子的方式更新数组里的某个元素，Atomic包提供了以下3个类。
+  ```
+  AtomicIntegerArray:原子更新整型数组里的元素
+  AtomicLongArray:原子更新长整型数组里的元素
+  AtomicReferenceArray:原子更新引用数据类型数组里的元素
+  
+  ```
+  > 
+  > 
+  > 
+  > 
+  > 
+  > 
+  ```
+  
+
+  ```
   > 
   > 
   > 
