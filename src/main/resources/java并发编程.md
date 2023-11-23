@@ -2147,8 +2147,47 @@
   AtomicIntegerArray:原子更新整型数组里的元素
   AtomicLongArray:原子更新长整型数组里的元素
   AtomicReferenceArray:原子更新引用数据类型数组里的元素
-  
+   
+  AtomicIntegerArray类主要是提供原子的方式更新数组里的整型，其常用方法如下
+    int addAndGet(int i,int delta);以原子方式将输入值与数组中索引i的元素相加
+    boolean compareAndSet(int i,int expect,int update);如果当前值等于预期值，则以原子方式将数组位置i的元素设置成update
+  以上几个类提供的方法几乎一样，
   ```
+  - 66:原子更新引用类型
+  > 原子更新基本类型的AtomicInteger，只能更新一个变量，如果要原子更新多个变量，就需
+  要使用这个原子更新引用类型提供的类。Atomic包提供了以下3个类。
+  ```
+  AtomicReference:原子更新引用类型
+  AtomicReferenceFieldUpdater:原子更新引用类型里的字段
+  AtomicMarkableReference:原子更新带有标记位的引用类型，可以原子更新一个布尔类型的标记位和引用类型
+      构造方法是：AtomicMarkableReference(V initialRef,boolean initialMark)
+  以上几个类提供的方法几乎一样,以AtomicReference为例子显示代码 
+
+  ```
+  - 67:原子更新字段类
+  > 如果需原子地更新某个类里的某个字段时，就需要使用原子更新字段类，Atomic包提供
+  了以下3个类进行原子字段更新。
+  ```
+  AtomicIntegerFieldUpdater:原子更新整形的字段的更新器
+  AtomicLongFieldUpdater:原子更新长整形的字段的更新器
+  AtomicStampedReference:原子更新带有版本号的引用类型,该类型将整数与引用关联起来，可用于原子的更新数据以及数据的版本号
+      可以解决使用cas进行原子更新时可能出现的ABA问题
+  要想原子地更新字段类需要两步。
+      第一步，因为原子更新字段类都是抽象类，每次使用的时候必须使用静态方法newUpdater()创建一个更新器，并且需要设置想要更新的类和属性。
+      第二步，更新类的字段（属性）必须使用public volatile修饰符。
+  以上3个类提供的方法几乎一样，以AstomicIntegerFieldUpdater为例演示代码
+  ```
+  - 68:本章小结
+  > 本章介绍了JDK中并发包里的13个原子操作类以及原子操作类的实现原理，读者需要熟
+  悉这些类和使用场景，在适当的场合下使用它
+   
+  - 69:java中的并发工具类
+  > 在JDK的并发包里提供了几个非常有用的并发工具类。CountDownLatch、CyclicBarrier和
+  Semaphore工具类提供了一种并发流程控制的手段，Exchanger工具类则提供了在线程间交换数
+  据的一种手段。本章会配合一些应用场景来介绍如何使用这些工具类
+  - 70：等待多线程完成的CountDownLatch (倒计数锁存 Latch:门闩; 插销; 弹簧锁; 碰锁)
+  > CountDownLatch允许一个或多个线程等待其他线程完成操作
+  > 
   > 
   > 
   > 
