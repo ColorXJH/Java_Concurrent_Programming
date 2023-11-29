@@ -2437,7 +2437,125 @@
   时候可以使用以下属性。
   ```
   ·taskCount：线程池需要执行的任务数量。
+  ·completedTaskCount：线程池在运行过程中已完成的任务数量，小于或等于taskCount。
+  ·largestPoolSize：线程池里曾经创建过的最大线程数量。通过这个数据可以知道线程池是否曾经满过。如该数值等于线程池的最大大小，则表示线程池曾经满过。
+  ·getPoolSize：线程池的线程数量。如果线程池不销毁的话，线程池里的线程不会自动销毁，所以这个大小只增不减
+  ·getActiveCount：获取活动的线程数。
   ``` 
+  > 通过扩展线程池进行监控。可以通过继承线程池来自定义线程池，重写线程池的
+  beforeExecute、afterExecute和terminated方法，也可以在任务执行前、执行后和线程池关闭前执
+  行一些代码来进行监控。例如，监控任务的平均执行时间、最大执行时间和最小执行时间等。
+  这几个方法在线程池里是空方法。
+  - 83:本章小结 
+  > 在工作中我经常发现，很多人因为不了解线程池的实现原理，把线程池配置错误，从而导
+  致了各种问题。本章介绍了为什么要使用线程池、如何使用线程池和线程池的使用原理，相信
+  阅读完本章之后，读者能更准确、更有效地使用线程池
+   
+  - 84:Executor框架 
+  > 在Java中，使用线程来异步执行任务。Java线程的创建与销毁需要一定的开销，如果我们
+  为每一个任务创建一个新线程来执行，这些线程的创建与销毁将消耗大量的计算资源。同时，
+  为每一个任务创建一个新线程来执行，这种策略可能会使处于高负荷状态的应用最终崩溃。
+  > 
+  > Java的线程既是工作单元，也是执行机制。从JDK 5开始，把工作单元与执行机制分离开
+  来。工作单元包括Runnable和Callable，而执行机制由Executor框架提供。
+  - 85:Executor框架简介
+  - 86:Executor框架的两级调度模型 
+  > 在HotSpot VM的线程模型中，Java线程（java.lang.Thread）被一对一映射为本地操作系统线
+  程。Java线程启动时会创建一个本地操作系统线程；当该Java线程终止时，这个操作系统线程
+  也会被回收。操作系统会调度所有线程并将它们分配给可用的CPU。
+  > 
+  > 在上层，Java多线程程序通常把应用分解为若干个任务，然后使用用户级的调度器
+  （Executor框架）将这些任务映射为固定数量的线程；在底层，操作系统内核将这些线程映射到
+  硬件处理器上。这种两级调度模型的示意图如图10-1所示。
+  > 
+  > 从图中可以看出，应用程序通过Executor框架控制上层的调度；而下层的调度由操作系统
+  内核控制，下层的调度不受应用程序的控制
+  ![img_43.png](img_43.png)
+  - 87:Executor框架的结构与成员 
+  > 分两部分来介绍Executor：Executor的结构和Executor框架包含的成员组件
+  ```
+  1.Executor框架的结构
+    Executor框架主要由3大部分组成如下。
+    ·任务。包括被执行任务需要实现的接口：Runnable接口或Callable接口。
+    ·任务的执行。包括任务执行机制的核心接口Executor，以及继承自Executor的
+     ExecutorService接口。Executor框架有两个关键类实现了ExecutorService接口
+    （ThreadPoolExecutor和ScheduledThreadPoolExecutor）。
+    ·异步计算的结果。包括接口Future和实现Future接口的FutureTask类。
+    Executor框架包含的主要的类与接口如图10-2所示。
+      ·Executor是一个接口，它是Executor框架的基础，它将任务的提交与任务的执行分离开来。
+      ·ThreadPoolExecutor是线程池的核心实现类，用来执行被提交的任务。
+      ·ScheduledThreadPoolExecutor是一个实现类，可以在给定的延迟后运行命令，或者定期执
+        行命令。ScheduledThreadPoolExecutor比Timer更灵活，功能更强大。
+      ·Future接口和实现Future接口的FutureTask类，代表异步计算的结果。
+      ·Runnable接口和Callable接口的实现类，都可以被ThreadPoolExecutor或Scheduled-
+        ThreadPoolExecutor执行。
+  ``` 
+  ![img_44.png](img_44.png)
+  > Executor框架的使用示意图如图10-3所示。
+  ![img_45.png](img_45.png) 
+  > 主线程首先要创建实现Runnable或者Callable接口的任务对象。工具类Executors可以把一
+  个Runnable对象封装为一个Callable对象（Executors.callable（Runnable task）或
+  Executors.callable（Runnable task，Object result））。
+  > 
+  > 然后可以把Runnable对象直接交给ExecutorService执行（ExecutorService.execute（Runnable
+  command））；或者也可以把Runnable对象或Callable对象提交给ExecutorService执行（Executor-
+  Service.submit（Runnable task）或ExecutorService.submit（Callable<T>task））。
+  > 
+  > 如果执行ExecutorService.submit（…），ExecutorService将返回一个实现Future接口的对象
+  （到目前为止的JDK中，返回的是FutureTask对象）。由于FutureTask实现了Runnable，程序员也可
+  以创建FutureTask，然后直接交给ExecutorService执行。
+  > 
+  > 最后，主线程可以执行FutureTask.get()方法来等待任务执行完成。主线程也可以执行
+  FutureTask.cancel（boolean mayInterruptIfRunning）来取消此任务的执行。
+  - 88:Executor框架的成员 
+  > 介绍Executor框架的主要成员：ThreadPoolExecutor、ScheduledThreadPoolExecutor、
+  Future接口、Runnable接口、Callable接口和Executors。
+  ```
+  （1）ThreadPoolExecutor
+  ThreadPoolExecutor通常使用工厂类Executors来创建。Executors可以创建3种类型的
+  ThreadPoolExecutor：SingleThreadExecutor、FixedThreadPool和CachedThreadPool。
+  下面分别介绍这3种ThreadPoolExecutor。
+    1）FixedThreadPool:适用于为了满足资源管理的需求，而需要限制当前线程数量的应用场
+    景，它适用于负载比较重的服务器。
+    2）SingleThreadExecutor:SingleThreadExecutor适用于需要保证顺序地执行各个任务；并且在任意时间点，不会有多
+    个线程是活动的应用场景
+    3）CachedThreadPool:是大小无界的线程池，适用于执行很多的短期异步任务的小程序，或者
+    是负载较轻的服务器
+  （2）ScheduledThreadPoolExecutor
+  ScheduledThreadPoolExecutor通常使用工厂类Executors来创建。Executors可以创建2种类
+  型的ScheduledThreadPoolExecutor，如下。
+    ·ScheduledThreadPoolExecutor。包含若干个线程的ScheduledThreadPoolExecutor。
+      ScheduledThreadPoolExecutor适用于需要多个后台线程执行周期任务，同时为了满足资源
+      管理的需求而需要限制后台线程的数量的应用场景
+    ·SingleThreadScheduledExecutor。只包含一个线程的ScheduledThreadPoolExecutor。
+      SingleThreadScheduledExecutor适用于需要单个后台线程执行周期任务，同时需要保证顺
+      序地执行各个任务的应用场景。
+  （3）Future接口
+  Future接口和实现Future接口的FutureTask类用来表示异步计算的结果。当我们把Runnable
+  接口或Callable接口的实现类提交（submit）给ThreadPoolExecutor或
+  ScheduledThreadPoolExecutor时，ThreadPoolExecutor或ScheduledThreadPoolExecutor会向我们
+  返回一个FutureTask对象
+  
+  有一点需要读者注意，到目前最新的JDK 8为止，Java通过上述API返回的是一个
+  FutureTask对象。但从API可以看到，Java仅仅保证返回的是一个实现了Future接口的对象。在将
+  来的JDK实现中，返回的可能不一定是FutureTask。
+  （4）Runnable接口和Callable接口
+  Runnable接口和Callable接口的实现类，都可以被ThreadPoolExecutor或Scheduled-
+  ThreadPoolExecutor执行。它们之间的区别是Runnable不会返回结果，而Callable可以返回结
+  果。
+  除了可以自己创建实现Callable接口的对象外，还可以使用工厂类Executors来把一个
+  Runnable包装成一个Callable。
+  public static Callable<Object> callable(Runnable task) // 假设返回对象Callable1
+  
+  前面讲过，当我们把一个Callable对象（比如上面的Callable1或Callable2）提交给
+  ThreadPoolExecutor或ScheduledThreadPoolExecutor执行时，submit（…）会向我们返回一个
+  FutureTask对象。我们可以执行FutureTask.get()方法来等待任务执行完成。当任务成功完成后
+  FutureTask.get()将返回该任务的结果。例如，如果提交的是对象Callable1，FutureTask.get()方法
+  将返回null；如果提交的是对象Callable2，FutureTask.get()方法将返回result对象。
+  ``` 
+  > 
+  > 
+  > 
   > 
   > 
   > 
