@@ -7,6 +7,7 @@ package com.master.PART1;
  * @date 2024-01-23 16:59
  */
 public class Test {
+    //关于idea 科学上网无法拉取github代码的问题，见：https://blog.csdn.net/weixin_43160744/article/details/119054656
     public static void main(String[] args) throws InterruptedException {
         Thread t=new Thread(new Runnable() {
             @Override
