@@ -10,6 +10,10 @@ import java.util.Map;
  * @date 2024-02-18 15:24
  */
 public class Flyweight {
+    //在构造函数执行结束之前，不能访问对象的数据
+    //构造函数应该只执行与初始化数据相关的操作
+    //1：如果一个方法依赖于对象的初始化完成，那么构造函数就不应该调用该方法
+    //2：如果一个对象是在其他类可存取的成员变量或表中创建，那么构造函数应该避免使用该对象的引用
     public static void main(String[] args) {
         //创建字符对象，共享字体对象，
         Font fonts1=FontFactory.getFont("宋体",12);
