@@ -15,6 +15,8 @@ public class DeadLock {
     synchronized void setValue(long v){
         value=v;
     }
+    //swapValue是一个多方同步操作，也就是操作本身需要多个对象的锁，如果一不小心就会出现一个线程
+    //调用a.swapValue(b),另一个线程调用b.swapValue(a),当出现竞态条件时都没有释放彼此的锁时，就会出现死锁现象
     synchronized void swapValue(DeadLock other ){
         long t=getValue();
         long v=other.getValue();
