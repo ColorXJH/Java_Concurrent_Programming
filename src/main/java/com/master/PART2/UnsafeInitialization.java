@@ -49,4 +49,18 @@ public class UnsafeInitialization {
         System.out.println(list);
 
     }
+
+    //决定数据陈旧与否，或者是否需要声明为volatile类型十分依赖在使用环境中的遍历策略的选择，如果用索引循环来遍历
+    //那么使用陈旧的size值是不能接收的,例如，某个客户获得的size值是0，这样他会跳过循环，即使此时List中有很多元素也是如此
+    //注意，如果一旦运行循环，在执行第一个同步的get之后，便会刷新size,作为下一次调用size()的值，所以客户需要准备好处理
+    //在索引检查和元素访问之间size改变的情况，所以这种遍历方法是有问题的。
+    public void unsafeOperation(){
+        List<String>list=new ArrayList<>();
+        for(int i=0;i<list.size();++i){
+            System.out.println(list.get(i));
+        }
+    }
+    //但是如果使用聚合或者迭代变量，因为他们都执行内部的同步操作，所以程序员可以使用非同步的size()方法和非volatile的size
+    //并且声明这个方法这是大致估计了当前元素的个数，对于这种用户：他们获得的数据只要是上次同步的线程读或写之后的最新数据就可以了
+    //聚合器：forEach遍历 for (String item : list)  迭代器：Iterator<String> iterator = list.iterator();
 }
