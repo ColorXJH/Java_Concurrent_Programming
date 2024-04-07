@@ -193,4 +193,17 @@ class Part{
 class AnotherPart{
     public void help(){}
 }
-//作为一种设计策略，可以把大多数或者所有的类都定义成整个更新
+//作为一种设计策略，可以把大多数或者所有的类都定义成这个样子，以便在各种各样的基于容器的框架中使用，但是
+//但是如果一个Part对象的所有关系动态都被修改时，这种设计策略将很难使用，在这种情况下，程序员必须先对作为锁使用的成员变量
+//做额外的同步访问控制（通常使用synchronized（this））,然后再使用它来对方法体做访问控制
+    //如果把Part声明为Host的内部类，有一种比较简单的用于实现内部包容锁定的结构，这种情况下可以使用Host.this作为synchronized的同步块参数
+    //代码如下
+/*
+class Host{
+    class Part{
+        public void anAction(Host.this){
+            //operation
+            //..要执行的同步块操作
+        }
+    }
+}*/
