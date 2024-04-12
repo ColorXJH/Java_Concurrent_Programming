@@ -276,3 +276,22 @@ class C{
 //线程也不会因为中断而进入到 catch 块中执行相应的处理。因此，ThreadDeath 异常会影响到 interrupt() 方法的正常处理流程。
 
 //多阶段取消
+    //有时候即使是最普通的代码也要采取远比预期还要极端的方式来取消，为了应对这种可能性，需要构建一个通用的多阶段取消工具
+        //linux的关机程序就采用了这个模式，先试图使用kill -1 ,如果不行就kill -2 直到kill -9
+class Terminator{
+    static boolean terminate(Thread t,long maxWaitToDie){
+        if(!t.isAlive()){return true;}//already dead
+        //低级别打断
+        t.interrupt();
+        try {
+            t.join(maxWaitToDie);
+        } catch (InterruptedException e) {
+            //ignore
+        }
+        if(!t.isAlive()){return true;}//success
+        //高级别打断  基本上会返回true
+        //最终结果，如果还没打断
+        t.setPriority(Thread.MIN_PRIORITY);
+        return false;
+    }
+}
