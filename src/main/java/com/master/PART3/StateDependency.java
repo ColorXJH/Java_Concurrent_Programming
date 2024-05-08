@@ -369,4 +369,99 @@ class X{
 
 //通知
     //由于等待的这种结构确保了实现保障时的安全性，为了保证活跃性，类中还必须包含那些当等待的条件为真时，唤醒等待这些条件的线程的代码
+class SimpleBoundedCounter{
+    static final long MIN=0;
+    static final long MAX=10;
+    protected long count=MIN;
+    public synchronized long count(){
+        return count;
+    }
+
+    protected void setCount(long newValue){
+        count=newValue;
+         notifyAll();//需要注意的是，synchronized方法中，notifyAll放置的位置并不重要，只有当这个同步锁被释放之时，其他被唤醒的线程才可以继续，作为编程风格，一般放在方法最后
+    }
+
+    protected void awaitUnderMax() throws InterruptedException{
+        while (count==MAX) wait();
+    }
+
+    protected void awaitOverMin() throws InterruptedException{
+        while (count==MIN) wait();
+    }
+
+    public synchronized void dec() throws InterruptedException{
+        awaitOverMin();
+        setCount(count-1);
+    }
+
+    public synchronized void inc() throws InterruptedException{//这里仅仅同步方法内部的两个方法是不够的，需要同步这个外部inc方法
+        awaitUnderMax();
+        setCount(count+1);
+    }
+
+    //do not use
+    void badInc() throws InterruptedException{
+        //这里仅仅同步方法内部的两个方法是不够的，需要同步这个外部inc方法,原因如下：
+            //其他线程在*处（在等待结束并释放了锁之后和为增加count值而重新获得锁之间这段时间）所执行的操作导致的变化了的条件
+
+        synchronized (this){
+            awaitUnderMax();
+        }
+        //*
+        synchronized (this){
+            setCount(count+1);
+        }
+
+
+    }
+    //错误信号与丢失信号
+    //do not use
+    void badSetCount(long newValue){//该set操作不具备原子性，可能导致活跃性问题
+        //该方法首先获得锁以执行notifyAll，然后释放它
+        synchronized (this){
+            notifyAll();
+        }
+        //**（）xxx 执行到该点的线程可能会在试图唤醒它的信号发出之后，但是在其等待的条件改变之前就开始执行等待，随后这个线程要么一直处于等待中要么一直等待直到下一个通知被发出
+        //随后重新获得锁以改变count的值
+        synchronized (this){
+            count=newValue;
+        }
+    }
+}
+
+//单一通知
+    //在某些其他类中，可以使用notify代替notifyAll来减少通知操作所带来的上下文切换开销，当确认最多只有一个线程被唤醒时，可以使用单一通知来提高性能
+        //所有等待中的线程所等待的条件都依赖于同一个通知，通常他们所等待的条件也都是相同的
+        //每个通知本来就最多只能允许一个线程继续运行，这时唤醒其他线程就没有必要
+        //你可以接收interrupt和notify发生在同一时刻所带来的不确定因素。在这种情况下，这个被唤醒的线程很可能会被终止
+class GuardedClassUsingNotify{
+    protected boolean cond=false;
+    protected int nWaiting=0;//count waiting threads
+
+    protected synchronized void awaitCond() throws InterruptedException{
+        while (!cond){
+            ++nWaiting;//记录一个线程正在等待
+            try{
+                wait();
+            }catch (InterruptedException e){
+                notify();//重新通知其他未被取消的线程
+                throw e;
+            }finally {
+                --nWaiting;//线程不在等待
+            }
+
+        }
+    }
+
+    protected synchronized void signalCond(){
+        if(cond){
+            for(int i=nWaiting;i>0;--i){
+                notify();
+            }
+        }
+    }
+    //在开放的可扩展的设计中，使用notify所需要的条件是相当脆弱的，试用其代替notifyAll，来优化提供保障的构建通常是错误的源头，作为一个常用的设计策略
+    //可以把notify隔离在并发控制工具类中，这些工具类是可以被单独优化并仔细审查和测试的
+}
 
