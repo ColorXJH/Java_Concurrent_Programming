@@ -295,3 +295,73 @@ class Terminator{
         return false;
     }
 }
+
+//受保护方法
+    //保守的先测在做，当前提条件无法到达时，有以下三种处理情况
+        //1：阻碍 2：保护性挂起 3：超时
+    //无论什么时候，当一个方法再获取资源过程中应用“要么现在拥有且执行，要么就退出且不再执行”的策略时，阻碍方法也很有效
+    //保护性挂起案例：
+
+interface BoundedCounter{//任何实现了该接口的类都要保证计数器count的值在min和max之间
+    static final long MIN=0;
+    static final long MAX=10;
+    long count();//inv:MIN<count()<MAX
+    void inc();//only allowed when count()<MAX
+    void dec();//only allowed when count()>MIN
+
+}
+//保障：从某种意义上来说受保护方法是synchronized类型的方法的一种的可定制扩展，他提供了独占的一种扩展形态
+//保障也可以被看着是一种特殊形式的条件，在穿行执行的程序中，一个if语句就可以检测执行方法所以需要的条件是否为真，当条件没有满足时
+//就没有必要等待条件为真，因为没有其他的并发操作能使其条件为真，但是在并发程序中，异步的状态变化会在任何时候发生
+//因此受保护方法带来了那些在简单条件下不会出现的活跃性问题，任何保障都隐含着一个断言：最终某些线程会使需要的状态改变出现
+//或者如果这些状态改变不出现，最好的选择就是不去执行当前的操作
+
+//有条件的等待
+class BoundedCounterWithWhen{
+    protected long count=0;
+    public long count(){
+        return count;
+    }
+
+    public void inc(){
+        while(count<10){
+            ++count;
+        }
+    }
+
+    public void dec(){
+        while (count>0){
+            --count;
+        }
+    }
+}
+
+//基于状态的消息接收
+//监控机制
+    //实现受保护的方法基本上都是使用了Object.wait/notify/notifyAll策略的特殊形式
+        //对于每一个需要等待的条件，写一段受保护的wait循环，如果当前受保护的条件不为真，则使当前线程阻塞
+        //确保任何会改变被等待条件的方法都会通知那些正在等待z这些条件的线程，使得他们在被唤醒以后重新检查当前的受保护条件
+
+class X{
+    synchronized void w() throws InterruptedException{
+        before();
+        wait();
+        after();
+    }
+    synchronized void n(){
+        notifyAll();
+    }
+    void before(){}
+    void after(){}
+}
+//受保护的等待
+/*
+ * synchronized void inc()throws InterruptedException{
+ *      while(count>=MAX){
+ *          wait();
+ *      }
+ *      ++count;
+ * }
+ */
+
+//中断的等待
