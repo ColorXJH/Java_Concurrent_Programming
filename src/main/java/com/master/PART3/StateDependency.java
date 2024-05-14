@@ -465,3 +465,129 @@ class GuardedClassUsingNotify{
     //可以把notify隔离在并发控制工具类中，这些工具类是可以被单独优化并仔细审查和测试的
 }
 
+class GamePlayer implements Runnable{
+    protected GamePlayer other;
+    protected boolean myturn=false;
+    protected synchronized void setOther(GamePlayer player){
+        other=player;
+    }
+    synchronized void giveTurn(){
+        myturn=true;
+        notify();
+    }
+    void releaseTurn(){
+        GamePlayer player;
+        synchronized (this){
+            myturn=false;
+            player=other;
+        }
+        player.giveTurn();//open call
+    }
+
+    synchronized void awaitTurn() throws InterruptedException{
+        while (!myturn) wait();
+    }
+
+    void move(){
+        //perform one move();
+        System.out.println(Thread.currentThread().getName());
+    }
+
+    @Override
+    public void run() {
+        try{
+            for(;;){
+                awaitTurn();
+                move();
+                releaseTurn();
+            }
+        }catch (InterruptedException ie){
+
+        }
+    }
+
+    public static void main(String[] args) {
+        GamePlayer one=new GamePlayer();
+        GamePlayer two=new GamePlayer();
+        one.setOther(two);
+        two.setOther(one);
+        one.giveTurn();
+        new Thread(one).start();
+        new Thread(two).start();
+    }
+}
+//定时的等待
+class TimeOutException extends InterruptedException{}
+class TimeOutBoundedCounter{
+    protected long count=0;
+    protected long TIMEOUT=5000;
+    synchronized void inc() throws InterruptedException{
+        if(count>=10){
+            long start=System.currentTimeMillis();
+            long waitTime=TIMEOUT;
+            for(;;){
+                if(waitTime<=0)throw new TimeOutException();
+                else {
+                    try{
+                        wait(waitTime);
+                    }catch (InterruptedException ie){
+                        throw ie;
+                    }
+                    if(count<10){
+                        break;
+                    }else {
+                        long now=System.currentTimeMillis();
+                        waitTime=TIMEOUT-(now-start);
+                    }
+                }
+            }
+        }
+        ++count;
+        notifyAll();
+    }
+    synchronized void dec() throws InterruptedException{
+        //similar...
+    }
+
+ //忙等待
+    //通常，使用等待与通知的方式一般都要比乐观重试类型的忙等待（反复循环）要好
+    /*
+    protected void busyWaitUntilCond(){
+        while(!cond)
+            Thread.yield();
+    }
+     */
+
+//实现 不要去使用这个类
+    class SpinLock{
+        private volatile boolean busy=false;
+        synchronized void release(){busy=false;}
+        void acquire()throws InterruptedException{
+            int spinsBeforeYield=100;
+            int spinsBeforeSleep=200;
+            long sleepTime=1;
+            int spins=0;
+            for(;;){
+                if(!busy){
+                    synchronized (this){
+                        if(!busy){
+                            busy=true;
+                            return;
+                        }
+                    }
+                }
+                if(spins<spinsBeforeYield){
+                    ++spins;
+                }else if(spins<spinsBeforeSleep){
+                    ++spins;
+                    Thread.yield();
+                }else{
+                    Thread.sleep(sleepTime);
+                    sleepTime=3*sleepTime/2+1;
+                }
+            }
+        }
+}
+
+}
+
