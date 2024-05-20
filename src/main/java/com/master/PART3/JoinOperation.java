@@ -1,5 +1,8 @@
 package com.master.PART3;
 
+import java.util.Iterator;
+import java.util.concurrent.CopyOnWriteArrayList;
+
 /**
  * @ClassName: JoinOperation
  * @Package: com.master.PART3
@@ -120,4 +123,78 @@ public class JoinOperation {
     //分离观察者
         //解决有关完全协同操作的设计和实现问题的最佳方法就是：不坚持要求跨越多个独立对象的操作为原子性操作，完全原子化很少是必要的，并可能导致其他后续设计问题，并使类难以使用或复用
         //参考设计模式中的观察者模式：Observer
+        //一下为一个简单的实现：Subject仅仅用一个双精度数来代表其模拟的状态，使用CopyOnWriteArrayList类来维护Observer的列表，这就避免了在遍历观察者的时候锁定操作，同时也满足了设计的目的
+        //为了简化示例，这里的Observer被定义为一个具体的类而不是接口，，且只能处理一个subject
+    class Subject{
+        protected double val=0.0;
+        protected final CopyOnWriteArrayList observers=new CopyOnWriteArrayList();
+        public synchronized double getVal(){
+            return val;
+        }
+        public synchronized void setVal(double d){
+            this.val=d;
+        }
+        public void attach(Observer o){
+            observers.add(o);
+        }
+        public void detach(Observer o){
+            observers.remove(o);
+        }
+        public void changeValue(double newState){
+            setVal(newState);
+            for(Iterator it=observers.iterator(); it.hasNext();){
+                ((Observer)(it.next())).changed(this);
+            }
+        }
+    }
+
+    class Observer{
+        protected double cacheState;
+        protected final Subject subject;
+        public Observer(Subject subject){
+            this.subject=subject;
+            cacheState=subject.getVal();
+            display();
+        }
+        public synchronized void changed(Subject subject){
+            if(subject!=this.subject){return;}
+            double oldState=cacheState;
+            cacheState=this.subject.getVal();
+            if(oldState!=cacheState){
+                display();
+            }
+        }
+        protected  void display(){
+            System.out.println(cacheState);
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
