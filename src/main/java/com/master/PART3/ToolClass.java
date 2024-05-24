@@ -1,5 +1,6 @@
 package com.master.PART3;
 
+
 /**
  * @author ColorXJH
  * @version 1.0
@@ -112,4 +113,232 @@ public class ToolClass {
     //有界缓冲区
         //将辅助对象分为分别执行put和take的，对执行put操作的辅助类，计数器的值从数组的容量开始，对于执行take操作的辅助类
         //计数器的值是从0开始的，exchange只有在存储槽的数量大于0的时候才可以执行
+
+    final class BoundedBufferWithDelegates{//委托
+        private Object[] array;
+        private Exchanger putter;
+        private Exchanger taker;
+        public BoundedBufferWithDelegates(int capacity)throws IllegalArgumentException{
+            if(capacity<=0){throw new IllegalArgumentException();}
+            array=new Object[capacity];
+            putter=new Exchanger(capacity);
+            taker=new Exchanger(0);
+        }
+        public void put(Object x)throws InterruptedException{
+            putter.exchange(x);
+        }
+        public Object take()throws InterruptedException{
+            return taker.exchange(null);
+        }
+        void removeSlotNotification(Exchanger h){
+            if(h==putter)taker.addSlotsNotification();
+            else putter.addSlotsNotification();
+        }
+        protected class Exchanger{
+            protected int ptr=0;
+            protected int slots;
+            protected int waiting=0;
+            Exchanger(int n){
+                slots=n;
+            }
+            synchronized void addSlotsNotification(){
+                ++slots;
+                if(waiting>0){
+                    notify();//unlock a single waiting thread
+                }
+            }
+            Object exchange(Object x)throws InterruptedException{
+                Object old=null;
+                synchronized (this){
+                    while (slots<=0){
+                        ++waiting;
+                        try{
+                            wait();
+                        }catch (InterruptedException ie){
+                            notify();
+                            throw ie;
+                        }finally {
+                            --waiting;
+                        }
+                    }
+                    --slots;
+                    old=array[ptr];
+                    array[ptr]=x;
+                    ptr=(ptr+1)% array.length;
+                }
+                removeSlotNotification(this);
+                return old;
+            }
+        }
+
+    }
+
+    //合并类
+    final class BoundedBufferWithMonitorObjects{
+        private final Object[] array;//the elements
+        private int putPtr=0;//circular indices
+        private int takePtr=0;
+
+        private int emptySlots;//slots count
+        private int usedSlots=0;
+
+        private int waitingPuts=0;//counts of waiting thread
+        private int waitingTakes=0;
+
+        private final Object putMonitor=new Object();
+        private final Object takeMonitor=new Object();
+        public BoundedBufferWithMonitorObjects(int capacity)throws IllegalArgumentException{
+            if(capacity<=0)throw new IllegalArgumentException();
+            array=new Object[capacity];
+            emptySlots=capacity;
+        }
+
+        public void put(Object x)throws InterruptedException{
+            synchronized (putMonitor){
+                while (emptySlots<=0){
+                    ++waitingPuts;
+                    try {
+                        putMonitor.wait();
+                    }catch (InterruptedException ie){
+                        putMonitor.notify();
+                        throw ie;
+                    }finally {
+                        --waitingPuts;
+                    }
+                }
+                --emptySlots;
+                array[putPtr]=x;
+                putPtr=(putPtr+1)% array.length;
+            }
+            synchronized (takeMonitor){//directly notify
+                ++usedSlots;
+                if(waitingTakes>0)
+                    takeMonitor.notify();
+            }
+        }
+        public Object take()throws InterruptedException{
+            Object old=null;
+            synchronized (takeMonitor){
+                while (usedSlots<=0){
+                    ++waitingTakes;
+                    try{
+                        takeMonitor.wait();
+                    }catch (InterruptedException ie){
+                        takeMonitor.notify();
+                        throw ie;
+                    }finally {
+                        --waitingTakes;
+                    }
+                }
+                --usedSlots;
+                old=array[takePtr];
+                array[takePtr]=null;
+                takePtr=(takePtr+1)% array.length;
+            }
+            synchronized (putMonitor){
+                ++emptySlots;
+                if(waitingPuts>0)
+                    notify();
+            }
+            return old;
+        }
+    }
+
+    //特定通知
+    class FIFOSemaphone extends Semaphore{
+        protected final WaitQueue queue=new WaitQueue();
+        public FIFOSemaphone(long init){
+            super(init);
+        }
+
+        @Override
+        public void acquire() throws InterruptedException {
+            if(Thread.interrupted()) throw new InterruptedException();
+            WaitNode node=null;
+            synchronized (this){
+                if(permits>0){//no need to queue
+                    --permits;
+                    return;
+                }else{
+                    node=new WaitNode();
+                    queue.enq(node);
+                }
+            }
+            //must release lock before node wait
+            node.doWait();
+        }
+
+        @Override
+        public synchronized void release() {
+            for(;;){
+                WaitNode node=queue.deq();
+                if(node==null){
+                    ++permits;
+                    return;
+                }else if(node.doNotify()){
+                    return;
+                }
+                //else node was already released due to interruption or time-out  so must retry
+            }
+        }
+
+        protected  class WaitNode{
+            boolean release=false;
+            WaitNode next=null;
+            synchronized void doWait()throws InterruptedException{
+                try{
+                    while (!release)wait();
+                }catch (InterruptedException ie){
+                    if(!release){//通知前被打断
+                        //抑制将来的通知
+                        release=true;
+                        throw ie;
+                    }else{//通知后被打断
+                        //忽略异常但是传递异常状态码
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+            synchronized boolean doNotify(){
+                if(release)return false;
+                else release=true;
+                notify();
+                return true;
+            }
+
+            synchronized boolean doTimedWait(long times)throws InterruptedException{
+                //参见3.1.2
+                return false;
+            }
+
+        }
+        //标准的链表队列，使用在持有锁的时候使用
+        protected class WaitQueue{
+            protected WaitNode head=null;
+            protected WaitNode last=null;
+            protected void enq(WaitNode node){
+                if(last==null)head=last=node;
+                else{
+                    //将新节点添加到队列的末尾
+                    last.next=node;
+                    //更新添加后的队列尾节点的指针
+                    last=node;
+                }
+            }
+            protected WaitNode deq(){
+                //获取当前头节点
+                WaitNode node=head;
+                //检查是否为空队列，决定后续是否为空
+                if(node!=null){
+                    //更新头节点指针到下一个节点
+                    head=node.next;
+                    //如果更新后的头节点为空标识队列为空
+                    if(head==null)last=null;
+                    //断开出队节点的next指针，防止潜在的内存泄露
+                    node.next=null;
+                }
+                return node;
+            }
+        }
+    }
 }
