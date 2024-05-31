@@ -314,9 +314,123 @@ public class CreateThread {
         public abstract void show(Graphics g,Point origin);
     }
 
+    class BasicBox extends Box{
+        protected final Dimension size;
+        public BasicBox(int xdim,int ydim){
+            size=new Dimension(xdim,ydim);
+        }
 
+        @Override
+        public synchronized Dimension size() {
+            return size;
+        }
 
+        @Override
+        public void show(Graphics g, Point origin) {
+            g.setColor(getColor());
+            g.fillRect(origin.x,origin.y, size.width,size.height);
+        }
 
+        @Override
+        public synchronized Box duplicate() {
+            Box p=new BasicBox(size.width,size.height);
+            p.setColor(getColor());
+            return p;
+        }
+    }
+
+    abstract class JoinedPair extends Box{
+        protected Box fst;
+        protected Box snd;
+        protected JoinedPair(Box a,Box b){
+            fst=a;
+            snd=b;
+        }
+        public synchronized void flip(){
+            Box temp=fst;
+            fst=snd;
+            snd=temp;
+        }
+    }
+
+    class HorizontallyJoinedPair extends  JoinedPair{
+        protected final Dimension size;
+        public HorizontallyJoinedPair(Box l,Box r){
+            super(l,r);
+            size=new Dimension();
+        }
+
+        @Override
+        public Dimension size() {
+            return size;
+        }
+
+        @Override
+        public synchronized Box duplicate() {
+            HorizontallyJoinedPair p=new HorizontallyJoinedPair(fst.duplicate(),snd.duplicate());
+            p.setColor(getColor());
+            return p;
+        }
+
+        @Override
+        public void show(Graphics g, Point origin) {
+
+        }
+
+    }
+
+    /*class VerticallyJoinedPair extends JoinedPair{
+        //similar to upper
+    }*/
+    class WrappedBox extends Box{
+        protected Dimension wrapperSize;
+        protected Box inner;
+        public WrappedBox(Box innerBox ,Dimension size){
+            inner=innerBox;
+            wrapperSize=size;
+        }
+
+        @Override
+        public Dimension size() {
+            return null;
+        }
+
+        @Override
+        public Box duplicate() {
+            return null;
+        }
+
+        @Override
+        public void show(Graphics g, Point origin) {
+
+        }
+    }
+
+    //接口
+    interface PushSource{
+        void produce();
+    }
+    interface PushStage{
+        void putA(Box p);
+    }
+
+    interface DualInputPushStage extends PushStage{
+        void pushB(Box p);
+    }
+
+    //适配器
+    class DualInputAdapter implements PushStage{
+        protected final DualInputPushStage stage;
+        public DualInputAdapter(DualInputPushStage dualInputPushStage){
+            stage=dualInputPushStage;
+        }
+
+        @Override
+        public void putA(Box p) {
+            stage.pushB(p);
+        }
+    }
+    //接收器
 
 
 
