@@ -379,9 +379,27 @@ public class CreateThread {
 
     }
 
-    /*class VerticallyJoinedPair extends JoinedPair{
+    class VerticallyJoinedPair extends JoinedPair{
+        protected VerticallyJoinedPair(Box a, Box b) {
+            super(a, b);
+        }
+
+        @Override
+        public Dimension size() {
+            return null;
+        }
+
+        @Override
+        public Box duplicate() {
+            return null;
+        }
+
+        @Override
+        public void show(Graphics g, Point origin) {
+
+        }
         //similar to upper
-    }*/
+    }
     class WrappedBox extends Box{
         protected Dimension wrapperSize;
         protected Box inner;
@@ -431,14 +449,256 @@ public class CreateThread {
         }
     }
     //接收器
+    class DevNull implements PushStage{
+        @Override
+        public void putA(Box p) {
 
+        }
+    }
+    class SingleOutputPushStage{
+        private PushStage next1=null;
+        protected synchronized PushStage getNext1(){
+            return next1;
+        }
+        public synchronized void setNext1(PushStage next){
+            next1=next;
+        }
+    }
+    class DualOutputPushStage extends SingleOutputPushStage{
+        private PushStage next2=null;
 
+        public PushStage getNext2() {
+            return next2;
+        }
 
+        public void setNext2(PushStage next2) {
+            this.next2 = next2;
+        }
+    }
+    //线性阶段
+    class Painter extends SingleOutputPushStage implements  PushStage{
+        protected final Color color;
+        public Painter(Color color){
+            this.color=color;
+        }
+        @Override
+        public void putA(Box p) {
+            p.setColor(color);
+            getNext1().putA(p);
+        }
+    }
+    class Wrapper extends SingleOutputPushStage implements PushStage{
+        protected final int ticketness;
+        public Wrapper(int ticketness){
+            this.ticketness=ticketness;
+        }
 
+        @Override
+        public void putA(Box p) {
+            Dimension d=new Dimension(ticketness,ticketness);
+            getNext1().putA(new WrappedBox(p,d));
+        }
+    }
+    class Flipper extends SingleOutputPushStage implements PushStage{
+        @Override
+        public void putA(Box p) {
+            if(p instanceof JoinedPair){
+                ((JoinedPair)p).flip();
+                getNext1().putA(p);
+            }
+        }
+    }
+    //组合器
+    abstract class Joiner extends SingleOutputPushStage implements DualInputPushStage{
+        protected Box a=null;//incoming form putA
+        protected Box b=null;//incoming from putB
+        protected abstract Box join(Box a,Box b);
 
+        protected synchronized Box joinFromA(Box p){
+            while (a!=null)
+                try{
+                    wait();
+                }catch (InterruptedException ie){
+                    return null;
+                }
+                a=p;
+                return tryJoin();
+        }
+        protected synchronized Box joinFromB(Box p){
+            while (b!=null)
+                try {
+                    wait();
+                }catch (InterruptedException interruptedException){
+                    return null;
+                }
+            b=p;
+            return tryJoin();
+        }
 
+        protected synchronized Box tryJoin(){
+            if(a==null||b==null){
+                return null;
+            }
+            Box joined=join(a,b);
+            a=b=null;
+            notifyAll();
+            return  joined;
+        }
 
+        @Override
+        public void putA(Box p) {
+            Box j=joinFromA(p);
+            if(j!=null)getNext1().putA(j);
+        }
 
+        public void putB(Box b){
+            Box j=joinFromB(b);
+            if(j!=null)
+                getNext1().putA(j);
+        }
+    }
+
+    class HorizontalJoiner extends Joiner{
+        @Override
+        protected Box join(Box a, Box b) {
+            return new HorizontallyJoinedPair(a,b);
+        }
+
+        @Override
+        public void pushB(Box p) {
+
+        }
+    }
+    class VerticalJoiner extends Joiner{
+
+        @Override
+        public void pushB(Box p) {
+
+        }
+
+        @Override
+        protected Box join(Box a, Box b) {
+            return new VerticallyJoinedPair(a,b);
+        }
+    }
+
+    //收集器
+    class Collector extends SingleOutputPushStage implements DualInputPushStage{
+
+        @Override
+        public void putA(Box p) {
+            getNext1().putA(p);
+        }
+
+        @Override
+        public void pushB(Box p) {
+            getNext1().putA(p);
+        }
+    }
+    //双输出阶段：Dual output stage
+        //交替阶段
+    class Alternator extends DualOutputPushStage implements PushStage{
+        protected boolean outTo2=false;
+        protected synchronized boolean testAndInvert(){
+            boolean b=outTo2;
+            outTo2=!outTo2;
+            return b;
+        }
+
+        @Override
+        public void putA(Box p) {
+            if(testAndInvert())
+                getNext1().putA(p);
+            else {
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        getNext2().putA(p);
+                    }
+                }).start();
+            }
+        }
+    }
+    //复制阶段
+    class Cloner extends DualOutputPushStage implements PushStage{
+
+        @Override
+        public void putA(Box p) {
+            final Box p2=p.duplicate();
+            getNext1().putA(p);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    getNext2().putA(p2);
+                }
+            }).start();
+
+        }
+    }
+
+    //筛选阶段：把所有复合某些条件的输入都定向到y一个通道，把其他的输入送到另外的通道
+    interface BoxPredicate{
+        boolean test(Box p);
+    }
+    class MaxSizePredicate implements BoxPredicate{
+        protected final int max;
+        public MaxSizePredicate(int size){
+            this.max=size;
+        }
+        @Override
+        public boolean test(Box p) {
+            return p.size().height<=max&&p.size().width<=max;
+        }
+    }
+    class Screener extends DualOutputPushStage implements PushStage{
+        protected final BoxPredicate predicate;
+        public Screener(BoxPredicate p){
+            predicate=p;
+        }
+
+        @Override
+        public void putA(Box p) {
+            if(predicate.test(p)){
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        getNext1().putA(p);
+                    }
+                }).start();
+            }else
+                getNext2().putA(p);
+        }
+    }
+
+    //发送源
+        //它产生随机大小的基本盒子，配备一个自主循环的run方法，以重复调用produce方法，并使用随机的生产延时时间
+    class BasicBoxSource extends SingleOutputPushStage implements PushSource,Runnable{
+        protected final Dimension size;
+        protected final int productionTime;
+        public BasicBoxSource(Dimension s,int delay){
+            size=s;
+            productionTime=delay;
+        }
+        protected Box makeBox(){
+            return new BasicBox((int)(Math.random()*size.width)+1,(int)(Math.random()*size.height)+1);
+        }
+        @Override
+        public void produce() {
+            getNext1().putA(makeBox());
+        }
+
+        @Override
+        public void run() {
+            try {
+                for(;;){
+                    produce();
+                    Thread.sleep((int)(Math.random()*2*productionTime));
+                }
+            }catch (InterruptedException ie){
+
+            }
+        }
+    }
 
 
 
